@@ -1,0 +1,34 @@
+# SSQuant - 打包清单
+# 指定哪些额外文件需要包含在发布包中
+
+# 包含文档
+include README.md
+include LICENSE
+include requirements.txt
+
+# 包含示例（可选，如果想在PyPI包中包含示例）
+recursive-include examples *.py
+recursive-include examples *.md
+
+# 包含CTP二进制文件
+recursive-include ssquant/ctp *.pyd
+recursive-include ssquant/ctp *.dll
+recursive-include ssquant/ctp *.py
+recursive-include ssquant/ctp *.lib
+recursive-include ssquant/ctp *.h
+recursive-include ssquant/ctp *.dtd
+recursive-include ssquant/ctp *.xml
+
+# 包含资源文件（Logo等）
+recursive-include ssquant/assets *.png
+recursive-include ssquant/assets *.jpg
+recursive-include ssquant/assets *.jpeg
+
+# 排除不需要的文件
+global-exclude __pycache__
+global-exclude *.py[co]
+global-exclude .DS_Store
+global-exclude .git*
+prune data_cache
+prune optimization
+

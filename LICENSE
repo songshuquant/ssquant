@@ -1,0 +1,85 @@
+SSQuant 专有许可证 (非商用许可)
+SSQuant Proprietary License (Non-Commercial Use Only)
+
+版权所有 (c) 2025 SSQuant Team
+Copyright (c) 2025 SSQuant Team
+
+========================================
+许可条款
+========================================
+
+1. 定义
+   - "软件"指 SSQuant 期货量化交易框架及其所有组件
+   - "商业使用"指任何以盈利为目的的使用，包括但不限于：
+     * 在商业产品或服务中使用本软件
+     * 为客户提供基于本软件的服务
+     * 将本软件集成到商业解决方案中
+     * 使用本软件进行商业交易或投资管理
+
+2. 授权范围
+   本许可证授予您以下权利（仅限非商业用途）：
+   ✓ 下载和安装本软件
+   ✓ 用于个人学习和研究
+   ✓ 用于学术研究和教育目的
+   ✓ 用于个人投资策略开发和回测
+   ✓ 修改源代码供个人使用
+
+3. 禁止事项
+   未经版权所有者书面授权，您不得：
+   ✗ 将本软件用于任何商业目的
+   ✗ 出售、出租或以其他方式分发本软件
+   ✗ 将本软件作为商业产品或服务的一部分
+   ✗ 移除或修改本软件中的版权声明
+
+4. 商业授权
+   如需商业使用，请联系版权所有者获取商业许可：
+   - 邮箱：339093103@qq.com
+   - 网站：https://github.com/songshuquant/ssquant-ai
+
+5. 免责声明
+   本软件按"原样"提供，不提供任何明示或暗示的保证。
+   在任何情况下，版权所有者均不对因使用本软件而产生的
+   任何损害承担责任。
+
+   期货交易具有高风险，使用本软件进行交易的风险由用户自行承担。
+
+6. 终止
+   如果您违反本许可证的任何条款，您的使用权将自动终止。
+
+========================================
+License Terms (English)
+========================================
+
+1. Definitions
+   - "Software" refers to the SSQuant futures quantitative trading framework
+   - "Commercial Use" means any use for profit, including but not limited to:
+     * Using in commercial products or services
+     * Providing services based on this software
+     * Integrating into commercial solutions
+     * Using for commercial trading or investment management
+
+2. Granted Rights (Non-Commercial Only)
+   ✓ Download and install the software
+   ✓ Personal learning and research
+   ✓ Academic research and education
+   ✓ Personal investment strategy development
+   ✓ Modify source code for personal use
+
+3. Restrictions
+   Without written authorization, you may NOT:
+   ✗ Use for any commercial purpose
+   ✗ Sell, rent, or distribute the software
+   ✗ Include as part of commercial products
+   ✗ Remove or modify copyright notices
+
+4. Commercial License
+   For commercial use, contact:
+   - Email: 339093103@qq.com
+   - Website: https://github.com/songshuquant/ssquant-ai
+
+5. Disclaimer
+   THE SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND.
+   Futures trading involves high risk. Use at your own risk.
+
+6. Termination
+   Violation of any terms will automatically terminate your rights.
