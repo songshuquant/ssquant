@@ -2,7 +2,7 @@
 
 <div align="center">
 
-🐿️ **松鼠量化** | 专业的期货CTP量化交易框架
+🐿️ **松鼠Quant** | 专业的期货CTP量化交易框架
 
 [![PyPI](https://img.shields.io/pypi/v/ssquant.svg)](https://pypi.org/project/ssquant/)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
@@ -145,16 +145,6 @@ config = get_config(
 | [用户手册.md](用户手册.md) | 📖 完整使用教程 | 新手必读 |
 | [API参考手册.md](API参考手册.md) | 📚 详细API说明 | 开发查询 |
 | [文档导航.md](文档导航.md) | 📑 所有文档索引 | 查找文档 |
-
-### 专题指南
-
-| 文档 | 说明 |
-|------|------|
-| [数据管理指南.md](数据管理指南.md) | 数据获取、导入、落盘 |
-| [回测教程.md](回测教程.md) | 历史回测配置和优化 |
-| [SIMNOW使用指南.md](SIMNOW使用指南.md) | 模拟盘配置和测试 |
-| [实盘部署指南.md](实盘部署指南.md) | 实盘配置和风险管理 |
-
 ---
 
 ## 🎓 示例策略
