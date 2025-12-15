@@ -33,7 +33,7 @@ setup(
     description='专业的期货CTP量化交易框架',
     long_description=long_description,
     long_description_content_type='text/markdown',
-    url='https://github.com/songshuquant/ssquant-ai',
+    url='https://github.com/songshuquant/ssquant',
     
     # 包配置
     packages=find_packages(),
@@ -95,9 +95,9 @@ setup(
     
     # 项目链接
     project_urls={
-        'Documentation': 'https://github.com/songshuquant/ssquant-ai#readme',
-        'Source': 'https://github.com/songshuquant/ssquant-ai',
-        'Bug Reports': 'https://github.com/songshuquant/ssquant-ai/issues',
+        'Documentation': 'https://github.com/songshuquant/ssquant#readme',
+        'Source': 'https://github.com/songshuquant/ssquant',
+        'Bug Reports': 'https://github.com/songshuquant/ssquant/issues',
     },
     
     # 许可证

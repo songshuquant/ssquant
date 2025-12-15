@@ -48,10 +48,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/songshuquant/ssquant-ai"
-Documentation = "https://github.com/songshuquant/ssquant-ai#readme"
-Repository = "https://github.com/songshuquant/ssquant-ai"
-"Bug Tracker" = "https://github.com/songshuquant/ssquant-ai/issues"
+Homepage = "https://github.com/songshuquant/ssquant"
+Documentation = "https://github.com/songshuquant/ssquant#readme"
+Repository = "https://github.com/songshuquant/ssquant"
+"Bug Tracker" = "https://github.com/songshuquant/ssquant/issues"
 PyPI = "https://pypi.org/project/ssquant/"
 
 [tool.setuptools.packages.find]

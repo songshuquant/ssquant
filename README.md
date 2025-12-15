@@ -326,7 +326,7 @@ ACCOUNTS = {
 ## 📖 快速链接
 
 - [PyPI 主页](https://pypi.org/project/ssquant/) - 安装和版本信息
-- [GitHub 仓库](https://github.com/songshuquant/ssquant-ai) - 源码和问题反馈
+- [GitHub 仓库](https://github.com/songshuquant/ssquant) - 源码和问题反馈
 - [用户手册](用户手册.md) - 完整使用教程
 - [API参考](API参考手册.md) - 所有API详解
 
