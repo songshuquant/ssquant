@@ -41,8 +41,18 @@
 
 ### 1. 安装
 
+#### 方式一：使用 pip 安装（推荐）
+
 ```bash
 pip install ssquant
+```
+
+#### 方式二：从 GitHub 源码安装
+
+```bash
+git clone https://github.com/songshuquant/ssquant.git
+cd ssquant
+pip install -e .
 ```
 
 ### 2. 编写策略
