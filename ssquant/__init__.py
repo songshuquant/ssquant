@@ -1,6 +1,6 @@
 """SSQuant - 期货量化交易框架"""
 
-__version__ = "0.3.2"
+__version__ = "0.3.3"
 __author__ = "SSQuant Team"
 
 # 检查CTP可用性
