@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ssquant"
-version = "0.3.2"
+version = "0.3.3"
 description = "专业的期货CTP量化交易框架"
 readme = "README.md"
 requires-python = ">=3.9,<3.15"

@@ -328,8 +328,8 @@ ACCOUNTS = {
 
 - [PyPI 主页](https://pypi.org/project/ssquant/) - 安装和版本信息
 - [GitHub 仓库](https://github.com/songshuquant/ssquant) - 源码和问题反馈
-- [用户手册](用户手册.md) - 完整使用教程
-- [API参考](API参考手册.md) - 所有API详解
+- [用户手册](https://github.com/songshuquant/ssquant/blob/main/%E7%94%A8%E6%88%B7%E6%89%8B%E5%86%8C.md) - 完整使用教程
+- [API参考](https://github.com/songshuquant/ssquant/blob/main/API%E5%8F%82%E8%80%83%E6%89%8B%E5%86%8C.md) - 所有API详解
 
 ---
 
@@ -349,4 +349,4 @@ ACCOUNTS = {
 
 **开始你的量化交易之旅！** 🚀
 
-查看 [用户手册.md](用户手册.md) 了解详细使用方法。
+查看 [用户手册.md](https://github.com/songshuquant/ssquant/blob/main/%E7%94%A8%E6%88%B7%E6%89%8B%E5%86%8C.md) 了解详细使用方法。
