@@ -3,6 +3,7 @@
 <div align="center">
 
 🐿️ **松鼠Quant** | 专业的期货CTP量化交易框架
+<img width="728" height="352" alt="image" src="https://github.com/user-attachments/assets/26201b06-0992-44dd-8416-03edcbb8878b" />
 
 [![PyPI](https://img.shields.io/pypi/v/ssquant.svg)](https://pypi.org/project/ssquant/)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
