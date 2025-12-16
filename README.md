@@ -53,7 +53,7 @@ pip install ssquant
 ```bash
 git clone https://github.com/songshuquant/ssquant.git
 cd ssquant
-pip install -e .
+pip install -e.
 ```
 
 ### 2. 编写策略
