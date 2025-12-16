@@ -219,7 +219,7 @@ class DataSource:
         for i in sorted(orders_to_remove, reverse=True):
             self.pending_orders.pop(i)
         
-    def buy(self, volume: int = 1, reason: str = "", log_callback=None, order_type='bar_close', offset_ticks: Optional[int] = None):
+    def buy(self, volume: int = 1, reason: str = "", log_callback=None, order_type='bar_close', offset_ticks: Optional[int] = None, price: Optional[float] = None):
         """
         开多仓
         
@@ -228,12 +228,15 @@ class DataSource:
             reason (str): 交易原因
             log_callback: 日志回调函数
             order_type (str): 订单类型，可选值：
+                - 'limit': 限价单（需指定price）
                 - 'bar_close': 当前K线收盘价（默认）
                 - 'next_bar_open': 下一K线开盘价
                 - 'next_bar_close': 下一K线收盘价
                 - 'next_bar_high': 下一K线最高价
                 - 'next_bar_low': 下一K线最低价
                 - 'market': 市价单，按ask1价格成交（买入用卖一价）
+            offset_ticks: 价格偏移tick数
+            price: 限价单价格（仅当order_type='limit'时有效）
         
         Returns:
             bool: 是否成功下单
@@ -280,7 +283,9 @@ class DataSource:
             return True
         else:
             # 下一K线价格下单，添加到待执行队列
-            price = self.get_price_by_type(order_type)
+            if price is None:
+                price = self.get_price_by_type(order_type)
+            
             # 注意：如果是next_bar_open/high/low/close，价格可能为None，因为下一K线的数据尚未加载
             # 但我们仍然可以添加到待执行队列，等待下一K线时执行，再根据order_type获取正确的价格
             
@@ -300,7 +305,7 @@ class DataSource:
             
             return True
         
-    def sell(self, volume: Optional[int] = None, reason: str = "", log_callback=None, order_type='bar_close', offset_ticks: Optional[int] = None):
+    def sell(self, volume: Optional[int] = None, reason: str = "", log_callback=None, order_type='bar_close', offset_ticks: Optional[int] = None, price: Optional[float] = None):
         """
         平多仓
         
@@ -309,6 +314,8 @@ class DataSource:
             reason (str): 交易原因
             log_callback: 日志回调函数
             order_type (str): 订单类型，可选值同buy函数
+            offset_ticks: 价格偏移tick数
+            price: 限价单价格（仅当order_type='limit'时有效）
         
         Returns:
             bool: 是否成功下单
@@ -377,7 +384,8 @@ class DataSource:
             return True
         else:
             # 下一K线价格下单，添加到待执行队列
-            price = self.get_price_by_type(order_type)
+            if price is None:
+                price = self.get_price_by_type(order_type)
             # 注意：如果是next_bar_open/high/low/close，价格可能为None，因为下一K线的数据尚未加载
             
             if volume is None:
@@ -407,7 +415,7 @@ class DataSource:
             
             return True
         
-    def sellshort(self, volume: int = 1, reason: str = "", log_callback=None, order_type='bar_close', offset_ticks: Optional[int] = None):
+    def sellshort(self, volume: int = 1, reason: str = "", log_callback=None, order_type='bar_close', offset_ticks: Optional[int] = None, price: Optional[float] = None):
         """
         开空仓
         
@@ -416,6 +424,8 @@ class DataSource:
             reason (str): 交易原因
             log_callback: 日志回调函数
             order_type (str): 订单类型，可选值同buy函数
+            offset_ticks: 价格偏移tick数
+            price: 限价单价格（仅当order_type='limit'时有效）
         
         Returns:
             bool: 是否成功下单
@@ -462,7 +472,8 @@ class DataSource:
             return True
         else:
             # 下一K线价格下单，添加到待执行队列
-            price = self.get_price_by_type(order_type)
+            if price is None:
+                price = self.get_price_by_type(order_type)
             # 注意：如果是next_bar_open/high/low/close，价格可能为None，因为下一K线的数据尚未加载
             
             # 添加到待执行队列
@@ -481,7 +492,7 @@ class DataSource:
             
             return True
         
-    def buycover(self, volume: Optional[int] = None, reason: str = "", log_callback=None, order_type='bar_close', offset_ticks: Optional[int] = None):
+    def buycover(self, volume: Optional[int] = None, reason: str = "", log_callback=None, order_type='bar_close', offset_ticks: Optional[int] = None, price: Optional[float] = None):
         """
         平空仓
         
@@ -490,6 +501,8 @@ class DataSource:
             reason (str): 交易原因
             log_callback: 日志回调函数
             order_type (str): 订单类型，可选值同buy函数
+            offset_ticks: 价格偏移tick数
+            price: 限价单价格（仅当order_type='limit'时有效）
         
         Returns:
             bool: 是否成功下单
@@ -558,7 +571,8 @@ class DataSource:
             return True
         else:
             # 下一K线价格下单，添加到待执行队列
-            price = self.get_price_by_type(order_type)
+            if price is None:
+                price = self.get_price_by_type(order_type)
             # 注意：如果是next_bar_open/high/low/close，价格可能为None，因为下一K线的数据尚未加载
             
             if volume is None:
