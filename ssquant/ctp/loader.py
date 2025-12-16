@@ -100,6 +100,17 @@ def load_ctp_modules():
         if ctp_dir_str not in sys.path:
             sys.path.insert(0, ctp_dir_str)
         
+        # Windows下Python 3.8+需要显式添加DLL目录
+        if platform.system() == 'Windows' and hasattr(os, 'add_dll_directory'):
+            try:
+                os.add_dll_directory(ctp_dir_str)
+            except Exception:
+                # 如果添加失败（例如路径无效），尝试修改环境变量作为后备方案
+                os.environ['PATH'] = ctp_dir_str + os.pathsep + os.environ['PATH']
+        else:
+            # 旧版本Python或非Windows系统
+            os.environ['PATH'] = ctp_dir_str + os.pathsep + os.environ['PATH']
+        
         # 导入CTP模块（动态加载，静态分析器无法识别）
         import thostmduserapi as md_api  # type: ignore
         import thosttraderapi as td_api  # type: ignore
