@@ -9,6 +9,8 @@
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-Non--Commercial-red.svg)](LICENSE)
 
+[GitHub](https://github.com/songshuquant/ssquant) | [Gitee（国内推荐）](https://gitee.com/ssquant/ssquant)
+
 **一次编写，三处运行** - 回测 / SIMNOW模拟 / 实盘CTP
 
 </div>
@@ -38,6 +40,17 @@
 
 ---
 
+## 🖥️ 系统要求
+
+| 项目 | 要求 |
+|------|------|
+| **操作系统** | Windows 10+（⚠️ 目前仅支持 Windows，Linux 版本待更新） |
+| **Python** | 3.9 ~ 3.14 |
+| **CTP版本** | 6.7.7 ~ 6.7.10 |
+| **内存** | 4GB+ |
+
+---
+
 ## ⚡ 快速开始
 
 ### 1. 安装
@@ -56,7 +69,7 @@ pip install ssquant
 >    ```bash
 >    pip install ssquant -i https://pypi.tuna.tsinghua.edu.cn/simple
 >    ```
-> 3. **获取示例**：新手朋友直接通过 pip 安装框架，然后到 [GitHub](https://github.com/songshuquant/ssquant) 或 Gitee 下载 `examples/` 目录下的策略示例。
+> 3. **获取示例**：新手朋友直接通过 pip 安装框架，然后到 [GitHub](https://github.com/songshuquant/ssquant) 或 [Gitee（国内推荐）](https://gitee.com/ssquant/ssquant) 下载 `examples/` 目录下的策略示例。
 > 4. **补充依赖**：运行中如果提示缺什么库，直接 `pip install 库名` 安装即可。
 
 #### 方式二：从 GitHub/Gitee 源码安装
@@ -74,7 +87,82 @@ pip install -e .
 > - 命令最后有一个点 `.`，代表当前目录，不要漏掉。
 > - 文件夹名字（如 `ssquant-main`）不影响安装，只要目录结构正确即可。
 
-### 2. 编写策略
+#### ❓ 常见问题：ModuleNotFoundError: No module named 'ssquant'
+
+如果运行策略时遇到这个错误：
+
+```
+ModuleNotFoundError: No module named 'ssquant'
+```
+
+**原因**：ssquant 未安装或已被卸载。
+
+**解决方法**：
+
+1. 检查是否已安装：
+   ```bash
+   pip list | findstr ssquant   # Windows
+   ```
+
+2. 如果没有找到，重新安装：
+   ```bash
+   # 方式一：从 PyPI 安装
+   pip install ssquant
+   
+   # 方式二：从源码安装（在项目目录下执行）
+   pip install -e .
+   ```
+
+3. 验证安装成功：
+   ```bash
+   python -c "from ssquant.api.strategy_api import StrategyAPI; print('ssquant 导入成功!')"
+   ```
+
+### 2. 配置账户
+
+安装完成后，需要配置相关账户信息。编辑 `ssquant/config/trading_config.py`：
+
+#### 📊 数据API配置（回测必需）
+
+框架使用**松鼠俱乐部会员远程数据库**，会员填入账号密码后，回测和实盘自动预拉取数据到本地：
+
+```python
+# ========== 数据API认证 (松鼠俱乐部会员) ==========
+API_USERNAME = "你的会员账号"
+API_PASSWORD = "你的会员密码"
+```
+
+> 💡 **非会员用户**：
+> - 可自行修改远程服务器地址
+> - 或参考 `examples/A_工具_导入数据库DB示例.py` 导入本地数据
+
+#### 🔐 交易账户配置（模拟/实盘）
+
+```python
+# SIMNOW账户（模拟交易）
+ACCOUNTS = {
+    'simnow_default': {
+        'investor_id': '你的SIMNOW账号',
+        'password': '你的密码',
+        'server_name': '电信1',  # 电信1/电信2/移动/TEST
+        # ...
+    },
+    
+    # 实盘账户
+    'real_default': {
+        'broker_id': '期货公司代码',
+        'investor_id': '资金账号',
+        'password': '密码',
+        'md_server': 'tcp://xxx:port',
+        'td_server': 'tcp://xxx:port',
+        'app_id': 'AppID',
+        'auth_code': '授权码',
+        # ...
+    },
+}
+```
+
+### 3. 编写策略
 
 ```python
 from ssquant.api.strategy_api import StrategyAPI
@@ -124,7 +212,7 @@ if __name__ == "__main__":
     results = runner.run(strategy=my_strategy)
 ```
 
-### 3. 切换模式只需改配置
+### 4. 切换模式只需改配置
 
 ```python
 # ===== 回测模式 =====
@@ -282,13 +370,13 @@ api.buy(volume=1, index=1)
 ## 🔧 系统要求
 
 - **Python**: 3.9 ~ 3.14
-- **系统**: Windows 10+ (CTP仅支持Windows)
+- **系统**: Windows 10+（⚠️ 目前仅支持 Windows，Linux 版本待更新）
 - **内存**: 4GB+
 - **网络**: 稳定连接（实盘/SIMNOW）
 
 ### CTP版本支持
 
-框架内置 CTP 6.7.x 版本，位于 `ssquant/ctp/pyXXX/` 目录：
+框架内置 CTP 6.7.7 ~ 6.7.10 版本，位于 `ssquant/ctp/pyXXX/` 目录：
 
 | Python版本 | 目录 | 状态 |
 |-----------|------|------|
@@ -298,36 +386,6 @@ api.buy(volume=1, index=1)
 | 3.12 | `py312/` | ✅ 已包含 |
 | 3.13 | `py313/` | ✅ 已包含 |
 | 3.14 | `py314/` | ✅ 已包含 |
-
----
-
-## ⚙️ 账户配置
-
-编辑 `ssquant/config/trading_config.py`：
-
-```python
-# SIMNOW账户
-ACCOUNTS = {
-    'simnow_default': {
-        'investor_id': '你的SIMNOW账号',
-        'password': '你的密码',
-        'server_name': '电信1',  # 电信1/电信2/移动/TEST
-        # ...
-    },
-    
-    # 实盘账户
-    'real_default': {
-        'broker_id': '期货公司代码',
-        'investor_id': '资金账号',
-        'password': '密码',
-        'md_server': 'tcp://xxx:port',
-        'td_server': 'tcp://xxx:port',
-        'app_id': 'AppID',
-        'auth_code': '授权码',
-        # ...
-    },
-}
-```
 
 ---
 
@@ -346,8 +404,9 @@ ACCOUNTS = {
 
 - [PyPI 主页](https://pypi.org/project/ssquant/) - 安装和版本信息
 - [GitHub 仓库](https://github.com/songshuquant/ssquant) - 源码和问题反馈
-- [用户手册](https://github.com/songshuquant/ssquant/blob/main/%E7%94%A8%E6%88%B7%E6%89%8B%E5%86%8C.md) - 完整使用教程
-- [API参考](https://github.com/songshuquant/ssquant/blob/main/API%E5%8F%82%E8%80%83%E6%89%8B%E5%86%8C.md) - 所有API详解
+- [Gitee 仓库](https://gitee.com/ssquant/ssquant) - 国内推荐，访问更快
+- [用户手册](用户手册.md) - 完整使用教程
+- [API参考](API参考手册.md) - 所有API详解
 
 ---
 
