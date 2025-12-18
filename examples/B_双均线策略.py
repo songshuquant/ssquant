@@ -135,7 +135,7 @@ if __name__ == "__main__":
     from ssquant.config.trading_config import get_config
     
     # ========== 运行模式 ==========
-    RUN_MODE = RunMode.SIMNOW  # 可选: BACKTEST, SIMNOW, REAL_TRADING
+    RUN_MODE = RunMode.BACKTEST  # 可选: BACKTEST, SIMNOW, REAL_TRADING
     
     # ========== 策略参数 ==========
     strategy_params = {'fast_ma': 5, 'slow_ma': 20}
