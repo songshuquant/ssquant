@@ -24,6 +24,24 @@ except ImportError as e:
     sys.exit(1)
 
 
+def decode_ctp_error(error_msg):
+    """解码CTP错误消息"""
+    if isinstance(error_msg, bytes):
+        try:
+            return error_msg.decode('gbk')
+        except:
+            try:
+                return error_msg.decode('utf-8')
+            except:
+                return str(error_msg)
+    elif isinstance(error_msg, str):
+        try:
+            return error_msg.encode('latin1').decode('gbk')
+        except:
+            return error_msg
+    return str(error_msg)
+
+
 class TraderSpi(traderapi.CThostFtdcTraderSpi):
     """
     交易回调接口
@@ -57,7 +75,8 @@ class TraderSpi(traderapi.CThostFtdcTraderSpi):
         客户端认证响应
         """
         if pRspInfo and pRspInfo.ErrorID != 0:
-            print(f"认证失败: {pRspInfo.ErrorID} - {pRspInfo.ErrorMsg}")
+            error_msg = decode_ctp_error(pRspInfo.ErrorMsg)
+            print(f"认证失败: {pRspInfo.ErrorID} - {error_msg}")
         else:
             print("认证成功")
 
@@ -66,7 +85,8 @@ class TraderSpi(traderapi.CThostFtdcTraderSpi):
         登录请求响应
         """
         if pRspInfo and pRspInfo.ErrorID != 0:
-            print(f"登录失败: {pRspInfo.ErrorID} - {pRspInfo.ErrorMsg}")
+            error_msg = decode_ctp_error(pRspInfo.ErrorMsg)
+            print(f"登录失败: {pRspInfo.ErrorID} - {error_msg}")
         else:
             print("登录成功")
             if pRspUserLogin:
@@ -86,23 +106,24 @@ class TraderSpi(traderapi.CThostFtdcTraderSpi):
         错误应答
         """
         if pRspInfo:
-            print(f"错误: {pRspInfo.ErrorID} - {pRspInfo.ErrorMsg}")
+            error_msg = decode_ctp_error(pRspInfo.ErrorMsg)
+            print(f"错误: {pRspInfo.ErrorID} - {error_msg}")
 
     def OnRspOrderInsert(self, pInputOrder, pRspInfo, nRequestID: int, bIsLast: bool):
         """
         报单录入请求响应
         """
         if pRspInfo and pRspInfo.ErrorID != 0:
-            print(f"报单失败: {pRspInfo.ErrorID} - {pRspInfo.ErrorMsg}")
-        else:
-            print("报单成功")
+            error_msg = decode_ctp_error(pRspInfo.ErrorMsg)
+            print(f"报单失败: {pRspInfo.ErrorID} - {error_msg}")
 
     def OnRspOrderAction(self, pInputOrderAction, pRspInfo, nRequestID: int, bIsLast: bool):
         """
         报单操作请求响应
         """
         if pRspInfo and pRspInfo.ErrorID != 0:
-            print(f"撤单失败: {pRspInfo.ErrorID} - {pRspInfo.ErrorMsg}")
+            error_msg = decode_ctp_error(pRspInfo.ErrorMsg)
+            print(f"撤单失败: {pRspInfo.ErrorID} - {error_msg}")
         else:
             print("撤单成功")
 
@@ -132,7 +153,8 @@ class TraderSpi(traderapi.CThostFtdcTraderSpi):
         投资者结算结果确认响应
         """
         if pRspInfo and pRspInfo.ErrorID != 0:
-            print(f"结算单确认失败: {pRspInfo.ErrorID} - {pRspInfo.ErrorMsg}")
+            error_msg = decode_ctp_error(pRspInfo.ErrorMsg)
+            print(f"结算单确认失败: {pRspInfo.ErrorID} - {error_msg}")
         else:
             print("结算单确认成功")
 

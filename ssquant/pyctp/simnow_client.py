@@ -51,7 +51,9 @@ class SIMNOWMdSpi(MdSpi):
     def OnRspUserLogin(self, pRspUserLogin, pRspInfo, nRequestID: int, bIsLast: bool):
         """登录响应"""
         if pRspInfo and pRspInfo.ErrorID != 0:
-            print(f"[{self._timestamp()}] [行情] 登录失败: {pRspInfo.ErrorID} - {pRspInfo.ErrorMsg}")
+            error_msg = self._decode_error_msg(pRspInfo.ErrorMsg)
+            full_msg = self._get_error_desc(pRspInfo.ErrorID, error_msg)
+            print(f"[{self._timestamp()}] [行情] 登录失败: {full_msg}")
             return
         
         self.logged_in = True
@@ -73,7 +75,9 @@ class SIMNOWMdSpi(MdSpi):
     def OnRspSubMarketData(self, pSpecificInstrument, pRspInfo, nRequestID: int, bIsLast: bool):
         """订阅行情响应"""
         if pRspInfo and pRspInfo.ErrorID != 0:
-            print(f"[{self._timestamp()}] [行情] 订阅失败: {pRspInfo.ErrorID} - {pRspInfo.ErrorMsg}")
+            error_msg = self._decode_error_msg(pRspInfo.ErrorMsg)
+            full_msg = self._get_error_desc(pRspInfo.ErrorID, error_msg)
+            print(f"[{self._timestamp()}] [行情] 订阅失败: {full_msg}")
         else:
             if pSpecificInstrument:
                 print(f"[{self._timestamp()}] [行情] 订阅成功: {pSpecificInstrument.InstrumentID}")
@@ -170,7 +174,9 @@ class SIMNOWTraderSpi(TraderSpi):
     def OnRspAuthenticate(self, pRspAuthenticateField, pRspInfo, nRequestID: int, bIsLast: bool):
         """认证响应"""
         if pRspInfo and pRspInfo.ErrorID != 0:
-            print(f"[{self._timestamp()}] [交易] 认证失败: {pRspInfo.ErrorID} - {pRspInfo.ErrorMsg}")
+            error_msg = self._decode_error_msg(pRspInfo.ErrorMsg)
+            full_msg = self._get_error_desc(pRspInfo.ErrorID, error_msg)
+            print(f"[{self._timestamp()}] [交易] 认证失败: {full_msg}")
             return
         
         print(f"[{self._timestamp()}] [交易] 认证成功")
@@ -179,7 +185,9 @@ class SIMNOWTraderSpi(TraderSpi):
     def OnRspUserLogin(self, pRspUserLogin, pRspInfo, nRequestID: int, bIsLast: bool):
         """登录响应"""
         if pRspInfo and pRspInfo.ErrorID != 0:
-            print(f"[{self._timestamp()}] [交易] 登录失败: {pRspInfo.ErrorID} - {pRspInfo.ErrorMsg}")
+            error_msg = self._decode_error_msg(pRspInfo.ErrorMsg)
+            full_msg = self._get_error_desc(pRspInfo.ErrorID, error_msg)
+            print(f"[{self._timestamp()}] [交易] 登录失败: {full_msg}")
             return
         
         self.logged_in = True
@@ -201,7 +209,9 @@ class SIMNOWTraderSpi(TraderSpi):
     def OnRspSettlementInfoConfirm(self, pSettlementInfoConfirm, pRspInfo, nRequestID: int, bIsLast: bool):
         """结算单确认响应"""
         if pRspInfo and pRspInfo.ErrorID != 0:
-            print(f"[{self._timestamp()}] [交易] 结算单确认失败: {pRspInfo.ErrorID} - {pRspInfo.ErrorMsg}")
+            error_msg = self._decode_error_msg(pRspInfo.ErrorMsg)
+            full_msg = self._get_error_desc(pRspInfo.ErrorID, error_msg)
+            print(f"[{self._timestamp()}] [交易] 结算单确认失败: {full_msg}")
             return
         
         print(f"[{self._timestamp()}] [交易] 结算单确认成功")
@@ -292,11 +302,13 @@ class SIMNOWTraderSpi(TraderSpi):
                     threading.Thread(target=refresh, daemon=True).start()
     
     def OnRspOrderInsert(self, pInputOrder, pRspInfo, nRequestID: int, bIsLast: bool):
-        """报单响应"""
+        """报单错误"""
         if pRspInfo and pRspInfo.ErrorID != 0:
             error_msg = self._decode_error_msg(pRspInfo.ErrorMsg)
             full_msg = self._get_error_desc(pRspInfo.ErrorID, error_msg)
+            print(f"[{self._timestamp()}] [交易] 报单失败: {full_msg}")
             
+            # 智能追单重试逻辑
             # 错误50：平今仓位不足 - 智能重试平昨（先检查是否有昨仓）
             if pRspInfo.ErrorID == 50 and pInputOrder:
                 offset_flag = pInputOrder.CombOffsetFlag[0] if pInputOrder.CombOffsetFlag else ''
@@ -348,7 +360,8 @@ class SIMNOWTraderSpi(TraderSpi):
         """查询资金账户响应"""
         if pRspInfo and pRspInfo.ErrorID != 0:
             error_msg = self._decode_error_msg(pRspInfo.ErrorMsg)
-            print(f"[{self._timestamp()}] [交易] 查询资金失败: {pRspInfo.ErrorID} - {error_msg}")
+            full_msg = self._get_error_desc(pRspInfo.ErrorID, error_msg)
+            print(f"[{self._timestamp()}] [交易] 查询资金失败: {full_msg}")
             return
         
         if pTradingAccount and self.client.on_account:
@@ -467,7 +480,8 @@ class SIMNOWTraderSpi(TraderSpi):
         """查询成交响应"""
         if pRspInfo and pRspInfo.ErrorID != 0:
             error_msg = self._decode_error_msg(pRspInfo.ErrorMsg)
-            print(f"[{self._timestamp()}] [交易] 查询成交失败: {pRspInfo.ErrorID} - {error_msg}")
+            full_msg = self._get_error_desc(pRspInfo.ErrorID, error_msg)
+            print(f"[{self._timestamp()}] [交易] 查询成交失败: {full_msg}")
             return
         
         if pTrade and self.client.on_query_trade:
@@ -504,27 +518,32 @@ class SIMNOWTraderSpi(TraderSpi):
         """解码错误消息（处理GBK编码）"""
         if isinstance(error_msg, bytes):
             try:
-                # CTP返回的是GBK编码
-                decoded = error_msg.decode('gbk')
-                # Windows命令行需要转换为utf-8再输出
-                return decoded
+                return error_msg.decode('gb18030')
             except:
                 try:
-                    return error_msg.decode('utf-8')
+                    return error_msg.decode('gbk')
                 except:
-                    return str(error_msg)
+                    try:
+                        return error_msg.decode('utf-8')
+                    except:
+                        # 最后的手段：返回Hex，方便排查
+                        return f"RawBytes({error_msg.hex()})"
         elif isinstance(error_msg, str):
-            # 如果已经是字符串，尝试重新编码
+            # 检查是否包含乱码字符
+            if any(ord(c) == 0xFFFD for c in error_msg): # replacement character
+                 return "解码失败(含替换符)"
             try:
-                # 如果字符串显示乱码，尝试先编码再解码
-                return error_msg.encode('latin1').decode('gbk')
+                return error_msg.encode('latin1').decode('gb18030')
             except:
-                return error_msg
+                pass
         return str(error_msg)
     
     def _get_error_desc(self, error_id: int, error_msg: str) -> str:
         """获取错误描述（添加常见错误的中文说明）"""
         error_descriptions = {
+            1: "CTP:综合交易平台:不在交易时段",
+            2: "CTP:综合交易平台:未授权",
+            3: "CTP:综合交易平台:不合法的登录",
             22: "合约不存在或未订阅",
             23: "报单价格不合法",
             30: "平仓数量超出持仓数量",

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ssquant"
-version = "0.3.5"
+version = "0.3.6"
 description = "专业的期货CTP量化交易框架"
 readme = "README.md"
 requires-python = ">=3.9,<3.15"
@@ -33,6 +33,10 @@ dependencies = [
     "pandas>=1.3.0",
     "numpy>=1.20.0",
     "requests>=2.25.0",
+    "matplotlib>=3.5.0",
+    "scipy>=1.7.0",
+    "Pillow>=8.0.0",
+    "akshare>=1.10.0",
 ]
 
 [project.optional-dependencies]
