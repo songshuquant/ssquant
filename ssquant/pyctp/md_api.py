@@ -24,6 +24,24 @@ except ImportError as e:
     sys.exit(1)
 
 
+def decode_ctp_error(error_msg):
+    """解码CTP错误消息"""
+    if isinstance(error_msg, bytes):
+        try:
+            return error_msg.decode('gbk')
+        except:
+            try:
+                return error_msg.decode('utf-8')
+            except:
+                return str(error_msg)
+    elif isinstance(error_msg, str):
+        try:
+            return error_msg.encode('latin1').decode('gbk')
+        except:
+            return error_msg
+    return str(error_msg)
+
+
 class MdSpi(mdapi.CThostFtdcMdSpi):
     """
     行情回调接口
@@ -61,7 +79,8 @@ class MdSpi(mdapi.CThostFtdcMdSpi):
         :param bIsLast: 是否最后一条
         """
         if pRspInfo and pRspInfo.ErrorID != 0:
-            print(f"登录失败: {pRspInfo.ErrorID} - {pRspInfo.ErrorMsg}")
+            error_msg = decode_ctp_error(pRspInfo.ErrorMsg)
+            print(f"登录失败: {pRspInfo.ErrorID} - {error_msg}")
         else:
             print("登录成功")
 
@@ -76,14 +95,16 @@ class MdSpi(mdapi.CThostFtdcMdSpi):
         错误应答
         """
         if pRspInfo:
-            print(f"错误: {pRspInfo.ErrorID} - {pRspInfo.ErrorMsg}")
+            error_msg = decode_ctp_error(pRspInfo.ErrorMsg)
+            print(f"错误: {pRspInfo.ErrorID} - {error_msg}")
 
     def OnRspSubMarketData(self, pSpecificInstrument, pRspInfo, nRequestID: int, bIsLast: bool):
         """
         订阅行情应答
         """
         if pRspInfo and pRspInfo.ErrorID != 0:
-            print(f"订阅行情失败: {pRspInfo.ErrorID} - {pRspInfo.ErrorMsg}")
+            error_msg = decode_ctp_error(pRspInfo.ErrorMsg)
+            print(f"订阅行情失败: {pRspInfo.ErrorID} - {error_msg}")
         else:
             if pSpecificInstrument:
                 print(f"订阅行情成功: {pSpecificInstrument.InstrumentID}")
