@@ -1,14 +1,15 @@
-# SSQuant 核心依赖
+# ssquant 框架依赖库
+# =====================
 
-# 数据处理
-pandas>=1.3.0
+# 核心依赖（必需）
 numpy>=1.20.0
-
-# 网络请求
+pandas>=1.3.0
 requests>=2.25.0
 
-# 可选依赖（机器学习策略需要）
-# scikit-learn>=0.24.0
-# joblib>=1.0.0
-# statsmodels>=0.12.0
+# 可视化依赖（回测报告需要）
+matplotlib>=3.5.0
+scipy>=1.7.0
+Pillow>=8.0.0
+akshare>=1.10.0
+
 
