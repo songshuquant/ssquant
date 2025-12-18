@@ -3,6 +3,10 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
+# 允许提交 CTP 相关的二进制文件
+!ssquant/ctp/**/*.pyd
+!ssquant/ctp/**/*.dll
+!ssquant/ctp/**/*.so
 .Python
 build/
 develop-eggs/
