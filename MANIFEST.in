@@ -13,6 +13,7 @@ recursive-include examples *.md
 # 包含CTP二进制文件
 recursive-include ssquant/ctp *.pyd
 recursive-include ssquant/ctp *.dll
+recursive-include ssquant/ctp *.so
 recursive-include ssquant/ctp *.py
 recursive-include ssquant/ctp *.lib
 recursive-include ssquant/ctp *.h
