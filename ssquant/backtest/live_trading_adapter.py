@@ -263,14 +263,15 @@ class LiveDataSource:
         self.current_idx = 0
         
         # K线数据缓存
-        self.klines = deque(maxlen=1000)  # 保存最近1000根K线
+        # lookback_bars 控制缓存大小，默认1000，设置0或不设置则使用默认值
+        cache_maxlen = config.get('lookback_bars', 0) or 1000
+        cache_maxlen = max(cache_maxlen, 100)  # 至少100条
+        self.klines = deque(maxlen=cache_maxlen)  # 保存最近的K线
         self.kline_count = 0  # K线总数计数器（不受deque长度限制）
         
         # Tick数据缓存
-        # 当预加载历史TICK时，需要更大的缓存空间
-        tick_maxlen = config.get('history_lookback_bars', 100) if config.get('preload_history', False) and config.get('kline_period', '').lower() == 'tick' else 100
-        tick_maxlen = max(tick_maxlen, 1000)  # 至少1000条，支持历史TICK回看
-        self.ticks = deque(maxlen=tick_maxlen)
+        # 统一使用 lookback_bars 控制缓存大小
+        self.ticks = deque(maxlen=cache_maxlen)  # 保存最近的TICK
         
         # K线聚合状态
         self.kline_period = config.get('kline_period', '1min')  # K线周期
@@ -640,11 +641,25 @@ class LiveDataSource:
             self.last_tick_open_interest = current_open_interest
             return None  # type: ignore
     
-    def get_klines(self) -> pd.DataFrame:
-        """获取K线数据"""
+    def get_klines(self, window: int = None) -> pd.DataFrame:
+        """获取K线数据
+        
+        Args:
+            window: 滑动窗口大小，None或0表示返回所有缓存数据（最多deque maxlen条）
+            
+        Returns:
+            K线数据DataFrame，最多返回window条（从最近往前）
+        """
         if not self.klines:
             return pd.DataFrame()
-        return pd.DataFrame(list(self.klines))
+        
+        klines_list = list(self.klines)
+        
+        # 如果指定了窗口大小且大于0，只返回最近的window条
+        if window is not None and window > 0:
+            klines_list = klines_list[-window:]
+        
+        return pd.DataFrame(klines_list)
     
     def get_close(self) -> pd.Series:
         """获取收盘价序列"""
@@ -687,11 +702,11 @@ class LiveDataSource:
             return dict(self.ticks[-1])
         return None
     
-    def get_ticks(self, window: int = 100) -> pd.DataFrame:
+    def get_ticks(self, window: int = None) -> pd.DataFrame:
         """获取最近window条tick数据
         
         Args:
-            window: 窗口大小，默认100（受deque maxlen限制）
+            window: 窗口大小，None表示返回所有缓存数据，0也表示不限制
             
         Returns:
             DataFrame: tick数据
@@ -699,10 +714,12 @@ class LiveDataSource:
         if not self.ticks:
             return pd.DataFrame()
         
-        # 从deque中获取最近window条数据
         tick_list = list(self.ticks)
-        if len(tick_list) > window:
-            tick_list = tick_list[-window:]
+        
+        # 如果指定了窗口大小且大于0，只返回最近的window条
+        if window is not None and window > 0:
+            if len(tick_list) > window:
+                tick_list = tick_list[-window:]
         
         return pd.DataFrame(tick_list)
     

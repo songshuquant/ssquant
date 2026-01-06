@@ -11,6 +11,7 @@
 2. 短周期(15分钟)寻找入场时机
 3. 只在大趋势方向上交易
 """
+from doctest import debug
 from ssquant.api.strategy_api import StrategyAPI
 from ssquant.backtest.unified_runner import UnifiedStrategyRunner, RunMode
 import pandas as pd
@@ -116,42 +117,44 @@ def cross_period_strategy(api: StrategyAPI):
     has_signal = signal_15m_buy or signal_15m_sell
     should_log = (bar_idx % 100 == 0) or has_signal or current_pos != 0
     
+    '''
     if should_log:
         api.log(f"\n[{bar_datetime}] 价格: {current_price:.2f}")
         api.log(f"  15分钟 - 快线: {curr_short_15m:.2f}, 慢线: {curr_long_15m:.2f}, 信号: {'金叉' if signal_15m_buy else '死叉' if signal_15m_sell else '无'}")
         api.log(f"  60分钟 - 快线: {curr_short_60m:.2f}, 慢线: {curr_long_60m:.2f}, 趋势: {'多头' if trend_60m_bullish else '空头' if trend_60m_bearish else '中性'}")
         api.log(f"  当前持仓: {current_pos}")
-    
+    '''
     # 交易逻辑：只有当60分钟周期趋势和15分钟周期信号一致时，才执行交易
     
     # 多头条件：60分钟多头趋势 + 15分钟金叉
     if trend_60m_bullish and signal_15m_buy:
         if current_pos <= 0:  # 如果没有持仓或者空头持仓
-            api.log(f"✅ 满足多头条件：60分钟多头趋势 + 15分钟金叉")
+            #api.log(f"✅ 满足多头条件：60分钟多头趋势 + 15分钟金叉")
             # 先平掉所有仓位，再开多仓
             if current_pos < 0:
-                api.log(f"  平空仓")
+                #api.log(f"  平空仓")
                 api.close_all(order_type='next_bar_open', index=0)
-            api.log(f"  开多仓")
+            #api.log(f"  开多仓")
             api.buy(volume=1, order_type='next_bar_open', index=0)
     
     # 空头条件：60分钟空头趋势 + 15分钟死叉
     elif trend_60m_bearish and signal_15m_sell:
         if current_pos >= 0:  # 如果没有持仓或者多头持仓
-            api.log(f"✅ 满足空头条件：60分钟空头趋势 + 15分钟死叉")
+            #api.log(f"✅ 满足空头条件：60分钟空头趋势 + 15分钟死叉")
             # 先平掉所有仓位，再开空仓
             if current_pos > 0:
-                api.log(f"  平多仓")
+                #api.log(f"  平多仓")
                 api.close_all(order_type='next_bar_open', index=0)
-            api.log(f"  开空仓")
+            #api.log(f"  开空仓")
             api.sellshort(volume=1, order_type='next_bar_open', index=0)
-    
+    '''
     # 当15分钟有信号但60分钟趋势不匹配时，给出提示
     elif has_signal:
         if signal_15m_buy:
             api.log(f"⚠️  15分钟金叉信号，但60分钟趋势不是多头，不交易")
         elif signal_15m_sell:
             api.log(f"⚠️  15分钟死叉信号，但60分钟趋势不是空头，不交易")
+    '''
 
 if __name__ == "__main__":
     from ssquant.config.trading_config import get_config
@@ -171,10 +174,17 @@ if __name__ == "__main__":
         config = get_config(RUN_MODE,
             # -------- 基础配置 --------
             start_date='2025-12-01',          # 回测开始日期
-            end_date='2025-12-31',            # 回测结束日期
+            end_date='2026-01-31',            # 回测结束日期
             initial_capital=100000,           # 初始资金 (元)
             commission=0.0001,                # 手续费率 (万分之一)
             margin_rate=0.1,                  # 保证金率 (10%)
+            debug=False,                      #显示api.log的输出，True=显示，False=不显示
+            # -------- 数据对齐配置 (多周期时建议开启) --------
+            align_data=True,                  # 是否对齐多数据源的时间索引
+            fill_method='ffill',              # 缺失值填充方法: 'ffill'向前填充, 'bfill'向后填充
+            
+            # -------- 数据窗口配置 --------
+            lookback_bars=500,                # K线回溯窗口 (0=不限制，策略get_klines返回的最大条数)
             
             # -------- 多周期数据源配置 (同品种2个周期) --------
             # 短周期用于入场信号，长周期用于趋势过滤
@@ -239,6 +249,9 @@ if __name__ == "__main__":
                 },
             ],
             
+            # -------- 数据窗口配置 --------
+            lookback_bars=500,                # K线回溯窗口 (0=不限制，策略get_klines返回的最大条数)
+            
             # -------- 回调模式配置 --------
             enable_tick_callback=False,       # TICK回调: False=K线驱动, True=TICK驱动
             
@@ -288,6 +301,9 @@ if __name__ == "__main__":
                     'adjust_type': '1',           # 复权类型
                 },
             ],
+            
+            # -------- 数据窗口配置 --------
+            lookback_bars=500,                # K线回溯窗口 (0=不限制，策略get_klines返回的最大条数)
             
             # -------- 回调模式配置 --------
             enable_tick_callback=False,       # TICK回调: False=K线驱动, True=TICK驱动

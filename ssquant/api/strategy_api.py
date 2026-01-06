@@ -88,19 +88,30 @@ class StrategyAPI:
             return False
         return True
     
-    def get_klines(self, index: int = 0) -> pd.DataFrame:
+    def get_klines(self, index: int = 0, window: int = None) -> pd.DataFrame:
         """
         获取指定数据源的K线数据
         
         Args:
             index: 数据源索引，默认为0（第一个数据源）
+            window: 滑动窗口大小，None表示使用配置的lookback_bars，0表示不限制
             
         Returns:
-            K线数据DataFrame
+            K线数据DataFrame，最多返回window条（从最近往前）
+            
+        示例:
+            # 使用配置的lookback_bars
+            klines = api.get_klines(0)
+            
+            # 指定获取最近100条
+            klines = api.get_klines(0, window=100)
+            
+            # 获取全部数据（忽略lookback_bars配置）
+            klines = api.get_klines(0, window=0)
         """
         ds = self.get_data_source(index)
         if ds:
-            return ds.get_klines()
+            return ds.get_klines(window=window)
         return pd.DataFrame()
     
     def get_datetime(self, index: int = 0):
@@ -514,7 +525,7 @@ class StrategyAPI:
             return ds.get_tick()
         return None
 
-    def get_ticks(self, window: int = 100, index: int = 0):
+    def get_ticks(self, window: int = None, index: int = 0):
         """
         获取最近window条tick数据（DataFrame）
         
@@ -523,10 +534,21 @@ class StrategyAPI:
             历史TICK数据会被预加载到缓存中，可以通过增大window参数来获取更多历史数据。
             
         Args:
-            window: 滑窗长度，默认100。如需获取所有预加载的历史TICK，可使用 get_ticks_count() 获取总数
+            window: 滑窗长度，None表示使用配置的lookback_bars（默认100）
+                    如需获取所有预加载的历史TICK，可使用 get_ticks_count() 获取总数
             index: 数据源索引，默认为0
         Returns:
             最近window条tick数据（DataFrame），若无数据则返回空DataFrame
+            
+        示例:
+            # 使用配置的lookback_bars
+            ticks = api.get_ticks()
+            
+            # 指定获取最近50条
+            ticks = api.get_ticks(window=50)
+            
+            # 获取全部缓存的TICK
+            ticks = api.get_ticks(window=0)
         """
         ds = self.get_data_source(index)
         if ds:

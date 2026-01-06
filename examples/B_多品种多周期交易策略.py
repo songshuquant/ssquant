@@ -261,6 +261,9 @@ def multi_source_strategy(api: StrategyAPI):
 if __name__ == "__main__":
     from ssquant.config.trading_config import get_config
     
+
+    ###注意，这是4个独立运行的策略案例，不要对齐数据，否则会出错。
+
     # ========== 选择运行模式 ==========
     RUN_MODE = RunMode.BACKTEST
     
@@ -276,10 +279,17 @@ if __name__ == "__main__":
         config = get_config(RUN_MODE,
             # -------- 基础配置 --------
             start_date='2025-12-01',          # 回测开始日期
-            end_date='2025-12-31',            # 回测结束日期
+            end_date='2026-01-31',            # 回测结束日期
             initial_capital=100000,           # 初始资金 (元)
             commission=0.0001,                # 手续费率 (万分之一)
             margin_rate=0.1,                  # 保证金率 (10%)
+            
+            # -------- 数据对齐配置 (独立策略不需要对齐) --------
+            align_data=False,                  # 多个独立策略不需要对齐数据
+            fill_method='ffill',              # 缺失值填充方法: 'ffill'向前填充, 'bfill'向后填充
+            
+            # -------- 数据窗口配置 --------
+            lookback_bars=500,                # K线回溯窗口 (0=不限制，策略get_klines返回的最大条数)
             
             # -------- 多品种多周期数据源配置 (焦炭+焦煤, 各2个周期) --------
             data_sources=[
@@ -389,6 +399,9 @@ if __name__ == "__main__":
                 },
             ],
             
+            # -------- 数据窗口配置 --------
+            lookback_bars=500,                # K线回溯窗口 (0=不限制，策略get_klines返回的最大条数)
+            
             # -------- 回调模式配置 --------
             enable_tick_callback=False,       # TICK回调: False=K线驱动, True=TICK驱动
             
@@ -468,6 +481,9 @@ if __name__ == "__main__":
                     'adjust_type': '1',           # 复权类型
                 },
             ],
+            
+            # -------- 数据窗口配置 --------
+            lookback_bars=500,                # K线回溯窗口 (0=不限制，策略get_klines返回的最大条数)
             
             # -------- 回调模式配置 --------
             enable_tick_callback=False,       # TICK回调: False=K线驱动, True=TICK驱动

@@ -122,6 +122,9 @@ if __name__ == "__main__":
             price_tick=0.02,
             order_offset_ticks=0,          # 默认偏移 (限价单模式下此参数被忽略)
             preload_history=False,
+            
+            # -------- 数据窗口配置 --------
+            lookback_bars=500,             # TICK回溯窗口 (0=不限制，策略get_ticks返回的最大条数)
         )
     
     elif RUN_MODE == RunMode.REAL_TRADING:
@@ -140,6 +143,9 @@ if __name__ == "__main__":
             price_tick=0.02,
             order_offset_ticks=0,
             preload_history=False,
+            
+            # -------- 数据窗口配置 --------
+            lookback_bars=500,             # TICK回溯窗口 (0=不限制，策略get_ticks返回的最大条数)
         )
         
     else:

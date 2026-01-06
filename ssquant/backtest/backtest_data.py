@@ -176,12 +176,13 @@ class BacktestDataManager:
         self.data_dict = data_dict
         return data_dict
     
-    def create_data_sources(self, symbols_and_periods, data_dict):
+    def create_data_sources(self, symbols_and_periods, data_dict, lookback_bars: int = 0):
         """创建多数据源
         
         Args:
             symbols_and_periods: 品种和周期列表
             data_dict: 数据字典
+            lookback_bars: K线回溯窗口大小，0表示不限制（返回全部历史数据）
             
         Returns:
             multi_data_source: 多数据源实例
@@ -196,13 +197,15 @@ class BacktestDataManager:
             key = f"{symbol}_{kline_period}_{adjust_type}"
             if key in data_dict:
                 data = data_dict[key]
-                # 添加数据源
-                self.multi_data_source.add_data_source(symbol, kline_period, adjust_type, data)
-                self.log(f"添加数据源 #{i}: {symbol} {kline_period} adjust_type={adjust_type}")
+                # 添加数据源（传入lookback_bars参数）
+                self.multi_data_source.add_data_source(symbol, kline_period, adjust_type, data, 
+                                                       lookback_bars=lookback_bars)
+                self.log(f"添加数据源 #{i}: {symbol} {kline_period} adjust_type={adjust_type} lookback={lookback_bars}")
             else:
                 # 如果没有获取到这个周期的数据，添加一个空数据源
                 self.log(f"警告：未找到 {symbol} {kline_period} adjust_type={adjust_type} 数据，添加空数据源")
-                self.multi_data_source.add_data_source(symbol, kline_period, adjust_type)
+                self.multi_data_source.add_data_source(symbol, kline_period, adjust_type, 
+                                                       lookback_bars=lookback_bars)
         
         return self.multi_data_source
     

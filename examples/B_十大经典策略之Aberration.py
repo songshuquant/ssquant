@@ -113,7 +113,7 @@ if __name__ == "__main__":
             # -------- 基础配置 --------
             symbol='au888',                   # 合约代码 (连续合约用888后缀)
             start_date='2025-12-01',          # 回测开始日期
-            end_date='2025-12-31',            # 回测结束日期
+            end_date='2026-01-31',            # 回测结束日期
             kline_period='1m',                # K线周期
             adjust_type='1',                  # 复权类型: '0'不复权, '1'后复权
             
@@ -126,6 +126,9 @@ if __name__ == "__main__":
             initial_capital=100000,           # 初始资金
             commission=0.0001,                # 手续费率
             margin_rate=0.1,                  # 保证金率
+            
+            # -------- 数据窗口配置 --------
+            lookback_bars=500,                # K线回溯窗口 (0=不限制，策略get_klines返回的最大条数)
         )
     
     elif RUN_MODE == RunMode.SIMNOW:
@@ -153,6 +156,9 @@ if __name__ == "__main__":
             preload_history=True,             # 预加载历史K线 (ATR+布林带需要100根)
             history_lookback_bars=100,        # 预加载数量
             adjust_type='1',                  # 复权类型
+            
+            # -------- 数据窗口配置 --------
+            lookback_bars=500,                # K线/TICK回溯窗口 (0=不限制，策略get_klines返回的最大条数)
             
             # -------- 回调模式配置 --------
             enable_tick_callback=False,       # TICK回调模式
@@ -188,6 +194,9 @@ if __name__ == "__main__":
             preload_history=True,             # 预加载历史K线
             history_lookback_bars=100,        # 预加载数量
             adjust_type='1',                  # 复权类型
+            
+            # -------- 数据窗口配置 --------
+            lookback_bars=500,                # K线/TICK回溯窗口 (0=不限制，策略get_klines返回的最大条数)
             
             # -------- 回调模式配置 --------
             enable_tick_callback=False,       # TICK回调模式

@@ -317,7 +317,7 @@ if __name__ == "__main__":
     
     # ==================== 用户配置区域 ====================
     # 运行模式: BACKTEST(回测) / SIMNOW(模拟盘) / REAL_TRADING(实盘)
-    RUN_MODE = RunMode.SIMNOW
+    RUN_MODE = RunMode.BACKTEST
     
     # 交易合约（SIMNOW/实盘用具体合约，回测用主连）
     SYMBOL = 'au2602'
@@ -330,14 +330,17 @@ if __name__ == "__main__":
         config = get_config(RUN_MODE,
             # -------- 合约配置 --------
             symbol='au888',                # 回测合约（主力连续用888后缀）
-            start_date='2025-12-11',       # 回测开始日期（需有对应TICK数据）
-            end_date='2025-12-11',         # 回测结束日期
+            start_date='2026-1-1',       # 回测开始日期（需有对应TICK数据）
+            end_date='2026-01-31',         # 回测结束日期
             kline_period='tick',           # ⭐ 数据周期: tick=使用TICK数据回测
             
             # -------- 回测成本参数 --------
             price_tick=0.02,               # 最小变动价位（黄金=0.02, 白银=1, 螺纹=1）
             contract_multiplier=1000,      # 合约乘数（黄金=1000, 白银=15, 螺纹=10）
             slippage_ticks=1,              # 滑点跳数（模拟成交时的滑点）
+            
+            # -------- 数据窗口配置 --------
+            lookback_bars=1000,            # TICK回溯窗口 (高频策略建议1000-5000)
         )
     
     elif RUN_MODE == RunMode.SIMNOW:
@@ -362,6 +365,9 @@ if __name__ == "__main__":
             # 获取历史TICK: tick_count = api.get_ticks_count()
             #              all_ticks = api.get_ticks(window=tick_count)
             
+            # -------- 数据窗口配置 --------
+            lookback_bars=1000,            # TICK回溯窗口 (高频策略建议1000-5000)
+            
             # -------- 交易参数 --------
             price_tick=0.02,               # 最小变动价位（螺纹=1, 黄金=0.02）
             order_offset_ticks=5,         # 超价跳数（确保成交，10跳=0.2元偏移）
@@ -375,8 +381,8 @@ if __name__ == "__main__":
             # -------- 数据保存 --------
             save_kline_csv=False,          # 保存K线到CSV文件
             save_kline_db=False,           # 保存K线到数据库
-            save_tick_csv=False,           # 保存TICK到CSV文件
-            save_tick_db=False,            # 保存TICK到数据库（用于后续预加载）
+            save_tick_csv=True,           # 保存TICK到CSV文件
+            save_tick_db=True,            # 保存TICK到数据库（用于后续预加载）
             data_save_path='./live_data',  # CSV文件保存路径
             db_path='./data_cache/backtest_data.db',  # 数据库文件路径
         )
@@ -402,6 +408,9 @@ if __name__ == "__main__":
             preload_history=True,          # 是否预加载历史TICK
             history_lookback_bars=1000,    # 预加载TICK条数
             # history_symbol='au888',      # 可选：自定义历史数据源（默认自动推导为主连）
+            
+            # -------- 数据窗口配置 --------
+            lookback_bars=1000,            # TICK回溯窗口 (高频策略建议1000-5000)
             
             # -------- 交易参数 --------
             price_tick=0.02,               # 最小变动价位（黄金=0.02）

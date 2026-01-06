@@ -233,8 +233,8 @@ def get_futures_data(
                     print("数据库中没有TICK表，请先采集TICK数据")
                 return pd.DataFrame()
             
-            # 转换datetime
-            data['datetime'] = pd.to_datetime(data['datetime'])
+            # 转换datetime（支持带毫秒和不带毫秒的格式）
+            data['datetime'] = pd.to_datetime(data['datetime'], format='mixed')
             
             # 按日期筛选
             start_dt = pd.to_datetime(start_date)
@@ -938,8 +938,19 @@ def append_to_sqlite(data, db_path, table_name):
         if isinstance(data['datetime'].dtype, pd.DatetimeTZDtype):
             data['datetime'] = data['datetime'].dt.tz_localize(None)
         
-        # 转换为字符串格式（避免timestamp转换错误）
-        data['datetime'] = data['datetime'].dt.strftime('%Y-%m-%d %H:%M:%S').fillna('')
+        # 判断是否是TICK数据（表名含_tick或数据有毫秒）
+        is_tick_data = '_tick' in table_name.lower()
+        
+        if is_tick_data:
+            # TICK数据保留毫秒精度（格式：2026-01-06 10:34:00.500）
+            def format_with_ms(dt):
+                if pd.isna(dt):
+                    return ''
+                return dt.strftime('%Y-%m-%d %H:%M:%S.') + f'{dt.microsecond // 1000:03d}'
+            data['datetime'] = data['datetime'].apply(format_with_ms)
+        else:
+            # K线数据只需要秒级精度
+            data['datetime'] = data['datetime'].dt.strftime('%Y-%m-%d %H:%M:%S').fillna('')
     
     # 将所有inf和-inf替换为None
     data = data.replace([float('inf'), float('-inf')], None)

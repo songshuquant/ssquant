@@ -8,7 +8,7 @@ class DataSource:
     数据源类，用于管理单个数据源的数据和交易操作
     """
     
-    def __init__(self, symbol: str, kline_period: str, adjust_type: str = '1'):
+    def __init__(self, symbol: str, kline_period: str, adjust_type: str = '1', lookback_bars: int = 0):
         """
         初始化数据源
         
@@ -16,10 +16,12 @@ class DataSource:
             symbol: 品种代码，如'rb888'
             kline_period: K线周期，如'1h', 'D'
             adjust_type: 复权类型，'0'表示不复权，'1'表示后复权
+            lookback_bars: K线回溯窗口大小，0表示不限制（返回全部历史数据）
         """
         self.symbol = symbol
         self.kline_period = kline_period
         self.adjust_type = adjust_type
+        self.lookback_bars = lookback_bars  # K线回溯窗口大小
         self.data = pd.DataFrame()
         self.current_pos = 0
         self.target_pos = 0
@@ -803,16 +805,35 @@ class DataSource:
         df = self.get_klines()
         return df['volume'] if 'volume' in df.columns else pd.Series(dtype=float)  # type: ignore
         
-    def get_klines(self) -> pd.DataFrame:
+    def get_klines(self, window: int = None) -> pd.DataFrame:
         """
         获取K线数据
         
         回测模式：返回从开始到当前索引的数据（避免未来数据泄露）
         实盘模式：返回所有缓存的数据（deque滚动窗口）
+        
+        Args:
+            window: 滑动窗口大小，None表示使用配置的lookback_bars，0表示不限制
+            
+        Returns:
+            K线数据DataFrame，最多返回window条（从最近往前）
         """
         if not self.data.empty and hasattr(self, 'current_idx'):
             # 回测模式：只返回到当前索引的数据
-            return self.data.iloc[:self.current_idx + 1]
+            end_idx = self.current_idx + 1
+            
+            # 确定窗口大小：优先使用传入参数，其次使用配置的lookback_bars
+            effective_window = window if window is not None else getattr(self, 'lookback_bars', 0)
+            
+            
+            # 如果设置了窗口限制（大于0），则只返回最近的window条数据
+            if effective_window > 0:
+                start_idx = max(0, end_idx - effective_window)
+                return self.data.iloc[start_idx:end_idx]
+            else:
+                # 不限制，返回从开始到当前的所有数据
+                return self.data.iloc[:end_idx]
+        
         # 实盘模式或无索引：返回所有数据
         return self.data
 
@@ -822,11 +843,30 @@ class DataSource:
             return self.data.iloc[self.current_idx]
         return None
 
-    def get_ticks(self, window: int = 100) -> pd.DataFrame:
-        """返回最近window条tick数据（DataFrame）"""
+    def get_ticks(self, window: int = None) -> pd.DataFrame:
+        """返回最近window条tick数据（DataFrame）
+        
+        Args:
+            window: 滑动窗口大小，None表示使用配置的lookback_bars，0表示不限制
+            
+        Returns:
+            最近window条tick数据
+        """
         if not self.data.empty and self.current_idx < len(self.data):
-            start = max(0, self.current_idx - window + 1)
-            return self.data.iloc[start:self.current_idx+1]
+            end_idx = self.current_idx + 1
+            
+            # 确定窗口大小：优先使用传入参数，其次使用配置的lookback_bars，最后默认100
+            if window is not None:
+                effective_window = window
+            else:
+                effective_window = getattr(self, 'lookback_bars', 0) or 100
+            
+            # 如果窗口大于0，限制返回数据量
+            if effective_window > 0:
+                start_idx = max(0, end_idx - effective_window)
+                return self.data.iloc[start_idx:end_idx]
+            else:
+                return self.data.iloc[:end_idx]
         return pd.DataFrame()
 
 
@@ -844,7 +884,8 @@ class MultiDataSource:
         """设置日志回调函数"""
         self.log_callback = callback
         
-    def add_data_source(self, symbol: str, kline_period: str, adjust_type: str = '1', data: Optional[pd.DataFrame] = None) -> int:
+    def add_data_source(self, symbol: str, kline_period: str, adjust_type: str = '1', 
+                        data: Optional[pd.DataFrame] = None, lookback_bars: int = 0) -> int:
         """
         添加数据源
         
@@ -853,11 +894,12 @@ class MultiDataSource:
             kline_period: K线周期，如'1h', 'D'
             adjust_type: 复权类型，'0'表示不复权，'1'表示后复权
             data: 数据，如果为None则创建空数据源
+            lookback_bars: K线回溯窗口大小，0表示不限制
             
         Returns:
             数据源索引
         """
-        data_source = DataSource(symbol, kline_period, adjust_type)
+        data_source = DataSource(symbol, kline_period, adjust_type, lookback_bars=lookback_bars)
         if data is not None:
             data_source.set_data(data)
         self.data_sources.append(data_source)

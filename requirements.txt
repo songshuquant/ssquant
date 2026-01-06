@@ -7,9 +7,14 @@ pandas>=1.3.0
 requests>=2.25.0
 
 # 可视化依赖（回测报告需要）
-matplotlib>=3.5.0
-scipy>=1.7.0
-Pillow>=8.0.0
+plotly>=5.18.0
+
+# 数据获取
 akshare>=1.10.0
+
+# 以下依赖已废弃，保留用于兼容（可选）
+# matplotlib>=3.5.0
+# scipy>=1.7.0
+# Pillow>=8.0.0
 
 

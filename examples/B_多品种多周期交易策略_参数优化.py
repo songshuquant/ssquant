@@ -46,7 +46,7 @@ if __name__ == "__main__":
         symbol='j888', 
         config={  # 焦炭配置
             'start_date': '2025-12-01',      # 回测开始日期
-            'end_date': '2025-12-31',        # 回测结束日期
+            'end_date': '2026-01-31',        # 回测结束日期
             'initial_capital': 100000.0,     # 初始资金，单位：元
             'commission': 0.0001,            # 手续费率，例如：0.0001表示万分之1
             'margin_rate': 0.1,              # 保证金率，例如：0.1表示10%
@@ -62,7 +62,7 @@ if __name__ == "__main__":
         symbol='jm888', 
         config={  # 焦煤配置
             'start_date': '2025-12-01',      # 回测开始日期
-            'end_date': '2025-12-31',        # 回测结束日期
+            'end_date': '2026-01-31',        # 回测结束日期
             'initial_capital': 100000.0,     # 初始资金，单位：元
             'commission': 0.0001,            # 手续费率
             'margin_rate': 0.1,              # 保证金率

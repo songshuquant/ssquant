@@ -484,7 +484,7 @@ if __name__ == "__main__":
     from ssquant.config.trading_config import get_config
     
     # ========== 选择运行模式 ==========
-    RUN_MODE = RunMode.SIMNOW
+    RUN_MODE = RunMode.BACKTEST  # 可选: BACKTEST, SIMNOW, REAL_TRADING
     
     # ========== 策略参数 ==========
     strategy_params = {
@@ -500,7 +500,7 @@ if __name__ == "__main__":
             # -------- 基础配置 --------
             symbol='au888',                   # 合约代码
             start_date='2025-12-01',          # 回测开始日期
-            end_date='2025-12-31',            # 回测结束日期
+            end_date='2026-01-31',            # 回测结束日期
             kline_period='1m',                # K线周期
             adjust_type='1',                  # 复权类型
             
@@ -513,6 +513,9 @@ if __name__ == "__main__":
             initial_capital=100000,           # 初始资金
             commission=0.0001,                # 手续费率
             margin_rate=0.1,                  # 保证金率
+            
+            # -------- 数据窗口配置 --------
+            lookback_bars=1000,               # K线回溯窗口 (机器学习需要更多历史数据)
         )
     
     elif RUN_MODE == RunMode.SIMNOW:
@@ -540,6 +543,9 @@ if __name__ == "__main__":
             preload_history=True,             # 预加载历史K线 (ML需要60周期MA+训练样本)
             history_lookback_bars=300,        # 预加载数量 (建议300根以上)
             adjust_type='1',                  # 复权类型
+            
+            # -------- 数据窗口配置 --------
+            lookback_bars=1000,               # K线回溯窗口 (机器学习需要更多历史数据)
             
             # -------- 回调模式配置 --------
             enable_tick_callback=False,       # TICK回调模式 (ML策略用K线触发)
@@ -575,6 +581,9 @@ if __name__ == "__main__":
             preload_history=True,             # 预加载历史K线
             history_lookback_bars=300,        # 预加载数量
             adjust_type='1',                  # 复权类型
+            
+            # -------- 数据窗口配置 --------
+            lookback_bars=1000,               # K线回溯窗口 (机器学习需要更多历史数据)
             
             # -------- 回调模式配置 --------
             enable_tick_callback=False,       # TICK回调模式

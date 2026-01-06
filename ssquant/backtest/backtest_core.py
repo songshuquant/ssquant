@@ -9,7 +9,7 @@ from .backtest_logger import BacktestLogger
 from .backtest_data import BacktestDataManager
 from .backtest_results import BacktestResultCalculator
 from .backtest_report import BacktestReportGenerator
-from .backtest_visualization import BacktestVisualizer
+from .html_report import HTMLReportGenerator
 
 class MultiSourceBacktester:
     """
@@ -73,11 +73,11 @@ class MultiSourceBacktester:
         # 结果计算器
         self.result_calculator = BacktestResultCalculator(self.logger)
         
-        # 报告生成器
+        # 文本报告生成器
         self.report_generator = BacktestReportGenerator(self.logger)
         
-        # 可视化工具
-        self.visualizer = BacktestVisualizer(self.logger)
+        # HTML 报告生成器（替代 matplotlib 可视化）
+        self.html_report_generator = HTMLReportGenerator(self.logger)
         
         # 参数优化模式标志
         self._in_optimization_mode = False
@@ -189,8 +189,11 @@ class MultiSourceBacktester:
             # 获取数据
             data_dict = self.data_manager.fetch_data(self.symbols_and_periods, self.symbol_configs, self.base_config)
             
-            # 创建多数据源
-            multi_data_source = self.data_manager.create_data_sources(self.symbols_and_periods, data_dict)
+            # 创建多数据源（传入lookback_bars参数）
+            lookback_bars = self.base_config.get('lookback_bars', 0)
+            multi_data_source = self.data_manager.create_data_sources(
+                self.symbols_and_periods, data_dict, lookback_bars=lookback_bars
+            )
             
             # 对齐数据
             multi_data_source = self.data_manager.align_data(
@@ -198,17 +201,21 @@ class MultiSourceBacktester:
                 fill_method=self.base_config.get('fill_method', 'ffill')
             )
         
-        # 如果没有数据源，无法运行回测
-        if len(multi_data_source) == 0:
-            self.logger.log_message("没有获取到任何数据，无法运行回测")
-            return {}
-        
         # 运行回测
         self.logger.log_message("\n开始回测...")
         
-        # 获取所有数据源的最小长度
-        min_length = min([len(ds.data) for ds in multi_data_source.data_sources if not ds.data.empty])
-        self.logger.log_message(f"回测数据长度: {min_length}条K线")
+        # 根据是否对齐数据决定遍历长度
+        data_lengths = [len(ds.data) for ds in multi_data_source.data_sources if not ds.data.empty]
+        is_aligned = self.base_config.get('align_data', True)
+        
+        if is_aligned:
+            # 对齐模式：所有数据源长度相同，用min获取
+            total_length = min(data_lengths)
+            self.logger.log_message(f"回测数据长度: {total_length}条K线 (数据已对齐)")
+        else:
+            # 非对齐模式：使用最大长度，确保所有数据源都被完整遍历
+            total_length = max(data_lengths)
+            self.logger.log_message(f"回测数据长度: {total_length}条K线 (独立模式，各数据源: {data_lengths})")
         
         # 记录回测开始时间
         start_time = time.time()
@@ -234,7 +241,7 @@ class MultiSourceBacktester:
         progress_bar_length = 50  # 进度条长度
         
         # 逐条数据运行策略
-        for i in range(min_length):
+        for i in range(total_length):
             # 更新所有数据源的当前索引
             for ds in multi_data_source.data_sources:
                 if not ds.data.empty and i < len(ds.data):
@@ -253,13 +260,14 @@ class MultiSourceBacktester:
                     
                     # 处理待执行的订单
                     ds._process_pending_orders(log_callback=self.logger.log_message)
+                # 非对齐模式下，数据源遍历完后保持最后状态（不更新current_idx）
             
             # 显示进度条（仅在非优化模式下显示）
             if not self._in_optimization_mode:
                 current_time = time.time()
                 if current_time - progress_last_update >= progress_update_interval:
                     progress_last_update = current_time
-                    progress = float(i + 1) / min_length
+                    progress = float(i + 1) / total_length
                     filled_length = int(progress_bar_length * progress)
                     bar = '█' * filled_length + '-' * (progress_bar_length - filled_length)
                     
@@ -267,14 +275,14 @@ class MultiSourceBacktester:
                     elapsed = current_time - start_time
                     if elapsed > 0:
                         bars_per_minute = (i + 1) / elapsed * 60
-                        estimated_time = (min_length - i - 1) * elapsed / (i + 1)
+                        estimated_time = (total_length - i - 1) * elapsed / (i + 1)
                         
                         # 清空当前行并显示进度条
-                        print(f"\r回测进度: |{bar}| {progress*100:.1f}% ({i+1}/{min_length}) [{bars_per_minute:.0f}K线/分钟] [剩余: {estimated_time:.1f}秒]", end='', flush=True)
+                        print(f"\r回测进度: |{bar}| {progress*100:.1f}% ({i+1}/{total_length}) [{bars_per_minute:.0f}K线/分钟] [剩余: {estimated_time:.1f}秒]", end='', flush=True)
             
             # 调试信息（仅在debug=True时显示详细日志）
             if debug_mode and i % 100 == 0:
-                self.logger.log_message(f"处理第 {i}/{min_length} 条数据")
+                self.logger.log_message(f"处理第 {i}/{total_length} 条数据")
                 for j, ds in enumerate(multi_data_source.data_sources):
                     if not ds.data.empty and i < len(ds.data):
                         self.logger.log_message(f"数据源 #{j}: 时间={ds.current_datetime}, 价格={ds.current_price:.2f}, 持仓={ds.current_pos}")
@@ -284,7 +292,7 @@ class MultiSourceBacktester:
         
         # 完成进度条（仅在非优化模式下显示）
         if not self._in_optimization_mode:
-            print(f"\r回测进度: |{'█' * progress_bar_length}| 100.0% ({min_length}/{min_length}) [完成]", flush=True)
+            print(f"\r回测进度: |{'█' * progress_bar_length}| 100.0% ({total_length}/{total_length}) [完成]", flush=True)
             print()  # 添加一个换行
         
         # 记录回测结束时间
@@ -343,19 +351,22 @@ class MultiSourceBacktester:
             # 获取性能报告文件路径
             performance_file = self.logger.get_performance_file()
             
-            # 保存性能报告
+            # 保存文本绩效报告
             if performance_file:
                 self.report_generator.save_performance_report(results, performance_file)
                 report_path = performance_file
                 results['report_path'] = report_path
             
-            # 生成回测图表 - 只有在未禁用可视化时
-            if not no_visualization and multi_data_source:
-                # 使用plot_results生成详细图表
-                chart_paths = self.visualizer.plot_results(multi_data_source, results)
-                results['chart_paths'] = chart_paths
+            # 生成 HTML 交互式报告 - 只有在未禁用可视化时
+            if not no_visualization:
+                html_report_path = self.html_report_generator.generate_report(
+                    results, multi_data_source
+                )
+                results['html_report_path'] = html_report_path
+                results['chart_paths'] = [html_report_path] if html_report_path else []
             else:
                 results['chart_paths'] = []
+                results['html_report_path'] = None
             
             # 显示结果摘要 - 只有在未禁用控制台日志时
             if not no_console_log:
@@ -363,11 +374,10 @@ class MultiSourceBacktester:
                 
             # 即使在静默模式下也显示文件保存位置
             if performance_file:
-                print(f"回测报告已保存至: {os.path.abspath(performance_file)}")
+                print(f"文本报告已保存至: {os.path.abspath(performance_file)}")
             
-            if chart_paths:
-                for path in chart_paths:
-                    print(f"回测图表已保存至: {os.path.abspath(path)}")
+            if results.get('html_report_path'):
+                print(f"HTML报告已保存至: {os.path.abspath(results['html_report_path'])}")
         else:
             # 在优化模式下，不输出任何图表或报告
             results['chart_paths'] = []
@@ -402,12 +412,13 @@ class MultiSourceBacktester:
                 
         self.logger.log_message("----------------------------")
     
-    def show_results(self, results):
+    def show_results(self, results, multi_data_source=None):
         """
         显示回测结果并生成图表
         
         Args:
             results: 回测结果字典
+            multi_data_source: 多数据源实例（用于生成报告）
         
         Returns:
             回测结果字典(可能包含新生成的图表路径)
@@ -420,13 +431,15 @@ class MultiSourceBacktester:
         if 'performance' not in results:
             self.result_calculator.calculate_performance(results)
         
-        # 只有在NO_VISUALIZATION不为True时，才生成图表
+        # 只有在NO_VISUALIZATION不为True时，才生成 HTML 报告
         if not no_visualization:
-            # 生成回测图表
-            chart_paths = self.visualizer.generate_charts(results)
-            results['chart_paths'] = chart_paths
+            # 生成 HTML 交互式报告
+            html_report_path = self.html_report_generator.generate_report(results, multi_data_source)
+            results['html_report_path'] = html_report_path
+            results['chart_paths'] = [html_report_path] if html_report_path else []
         else:
             results['chart_paths'] = []
+            results['html_report_path'] = None
         
         # 只有在NO_CONSOLE_LOG不为True时，才生成报告
         if not no_console_log:
@@ -491,8 +504,11 @@ class MultiSourceBacktester:
         # 获取数据
         data_dict = self.data_manager.fetch_data(self.symbols_and_periods, self.symbol_configs, self.base_config)
         
-        # 创建多数据源
-        multi_data_source = self.data_manager.create_data_sources(self.symbols_and_periods, data_dict)
+        # 创建多数据源（传入lookback_bars参数）
+        lookback_bars = self.base_config.get('lookback_bars', 0)
+        multi_data_source = self.data_manager.create_data_sources(
+            self.symbols_and_periods, data_dict, lookback_bars=lookback_bars
+        )
         
         # 对齐数据
         multi_data_source = self.data_manager.align_data(
@@ -505,9 +521,16 @@ class MultiSourceBacktester:
             self.logger.log_message("没有获取到任何数据，无法预加载")
             return None, None
         
-        # 获取所有数据源的最小长度
-        min_length = min([len(ds.data) for ds in multi_data_source.data_sources if not ds.data.empty])
-        self.logger.log_message(f"预加载数据长度: {min_length}条K线")
+        # 根据是否对齐数据决定遍历长度
+        data_lengths = [len(ds.data) for ds in multi_data_source.data_sources if not ds.data.empty]
+        is_aligned = self.base_config.get('align_data', True)
+        
+        if is_aligned:
+            total_length = min(data_lengths)
+            self.logger.log_message(f"预加载数据长度: {total_length}条K线 (数据已对齐)")
+        else:
+            total_length = max(data_lengths)
+            self.logger.log_message(f"预加载数据长度: {total_length}条K线 (独立模式，各数据源: {data_lengths})")
         
         # 保存预加载的数据
         self._preloaded_data = data_dict

@@ -221,6 +221,7 @@ class UnifiedStrategyRunner:
         self.backtester = MultiSourceBacktester()
         
         # 设置基础配置
+        lookback_bars = self.config.get('lookback_bars', 500)
         self.backtester.set_base_config({
             'username': API_USERNAME,
             'password': API_PASSWORD,
@@ -228,6 +229,7 @@ class UnifiedStrategyRunner:
             'save_data': self.config.get('save_data', True),
             'align_data': self.config.get('align_data', False),
             'fill_method': self.config.get('fill_method', 'ffill'),
+            'lookback_bars': lookback_bars,  # K线回溯窗口大小
             'debug': self.config.get('debug', False)
         })
         

@@ -8,21 +8,35 @@ from ..backtest.unified_runner import RunMode
 
 
 # ========== 数据API认证 (quant789.com) ==========
-API_USERNAME = ""
-API_PASSWORD = ""
+# 默认使用松鼠Quant俱乐部远程数据服务器
+# 如需修改服务器地址，请编辑 ssquant/data/api_data_fetcher.py 第667行的 base_url
+API_USERNAME = ""              # 数据API账号 (您的俱乐部手机号或邮箱)
+API_PASSWORD = ""            # 数据API密码 (密码)
 
 # ========== 回测默认配置 ==========
 BACKTEST_DEFAULTS = {
-    'initial_capital': 20000,
-    'commission': 0.0001,
-    'margin_rate': 0.1,
-    'contract_multiplier': 10,
-    'price_tick': 1.0,
-    'slippage_ticks': 1,
-    'adjust_type': '1',
-    'use_cache': True,
-    'save_data': True,
-    'debug': False,
+    # -------- 资金配置 --------
+    'initial_capital': 20000,       # 初始资金 (元)
+    'commission': 0.0001,           # 手续费率 (万分之一)
+    'margin_rate': 0.1,             # 保证金率 (10%)
+    
+    # -------- 合约参数 --------
+    'contract_multiplier': 10,      # 合约乘数 (吨/手)
+    'price_tick': 1.0,              # 最小变动价位 (元)
+    'slippage_ticks': 1,            # 滑点跳数
+    'adjust_type': '1',             # 复权类型: '0'不复权, '1'后复权
+    
+    # -------- 数据对齐配置 (多数据源时使用) --------
+    'align_data': False,            # 默认不开启，是否对齐多数据源的时间索引 (跨周期过滤策略需开启)
+    'fill_method': 'ffill',         # 缺失值填充方法: 'ffill'向前填充, 'bfill'向后填充
+    
+    # -------- 数据窗口配置 --------
+    'lookback_bars': 0,           # K线回溯窗口大小，0表示不限制（返回全部历史数据），建议设置500-2000
+    
+    # -------- 缓存与调试 --------
+    'use_cache': True,              # 是否使用本地缓存数据
+    'save_data': True,              # 是否保存数据到本地缓存
+    'debug': False,                 # 是否开启调试模式
 }
 
 
@@ -51,9 +65,10 @@ ACCOUNTS = {
         # 数据配置
         'preload_history': True,          # 是否预加载历史K线
         'history_lookback_bars': 100,     # 预加载K线数量
+        'lookback_bars': 0,               # K线/TICK缓存窗口大小，0表示使用默认值(1000条)，建议设置500-2000
         'adjust_type': '1',               # 复权类型: '0'不复权, '1'后复权
         # 'history_symbol': 'rb888',      # 自定义历史数据源 (默认自动推导为主力XXX888)
-                                          # 跨期套利时可指定: 主力用'rb888', 次主力用'rb777'
+                                         # 跨期套利时可指定: 主力用'rb888', 次主力用'rb777'
         
         # 回调配置
         'enable_tick_callback': False,     # 是否启用TICK回调 (实时行情推送)
@@ -92,9 +107,10 @@ ACCOUNTS = {
         # 数据配置
         'preload_history': True,          # 是否预加载历史K线
         'history_lookback_bars': 100,     # 预加载K线数量
+        'lookback_bars': 0,               # K线/TICK缓存窗口大小，0表示使用默认值(1000条)，建议设置500-2000
         'adjust_type': '1',               # 复权类型: '0'不复权, '1'后复权
         # 'history_symbol': 'rb888',      # 自定义历史数据源 (默认自动推导为主力XXX888)
-                                          # 跨期套利时可指定: 主力用'rb888', 次主力用'rb777'
+                                         # 跨期套利时可指定: 主力用'rb888', 次主力用'rb777'
         
         # 回调配置
         'enable_tick_callback': False,     # 是否启用TICK回调 (实时行情推送)

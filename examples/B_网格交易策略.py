@@ -150,7 +150,7 @@ def grid_strategy(api: StrategyAPI):
 if __name__ == "__main__":
     
     # ========== 运行模式 ==========
-    RUN_MODE = RunMode.SIMNOW  # 可选: BACKTEST, SIMNOW, REAL_TRADING
+    RUN_MODE = RunMode.BACKTEST  # 可选: BACKTEST, SIMNOW, REAL_TRADING
     
     # ========== 策略参数 ==========
     # 注意：grid_spacing 需要根据品种价格合理设置
@@ -168,7 +168,7 @@ if __name__ == "__main__":
             # -------- 合约配置 --------
             symbol='rb888',                   # 合约代码（连续合约用888后缀）
             start_date='2025-12-01',          # 回测开始日期
-            end_date='2025-12-31',            # 回测结束日期
+            end_date='2026-01-31',            # 回测结束日期
             kline_period='1m',                # K线周期: 1m/5m/15m/30m/1h/1d
             adjust_type='1',                  # 复权类型: '0'不复权, '1'后复权
             
@@ -181,6 +181,9 @@ if __name__ == "__main__":
             initial_capital=500000,           # 初始资金（网格策略需要更多资金）
             commission=0.0001,                # 手续费率
             margin_rate=0.1,                  # 保证金率
+            
+            # -------- 数据窗口配置 --------
+            lookback_bars=500,                # K线回溯窗口 (0=不限制，策略get_klines返回的最大条数)
         )
     
     elif RUN_MODE == RunMode.SIMNOW:
@@ -208,6 +211,9 @@ if __name__ == "__main__":
             preload_history=True,             # 是否预加载历史K线
             history_lookback_bars=50,         # 预加载K线数量
             adjust_type='1',                  # 复权类型
+            
+            # -------- 数据窗口配置 --------
+            lookback_bars=500,                # K线/TICK回溯窗口 (0=不限制，策略get_klines返回的最大条数)
             
             # -------- 回调模式配置 --------
             enable_tick_callback=False,       # TICK回调: True=每个TICK触发, False=每根K线触发
@@ -245,6 +251,9 @@ if __name__ == "__main__":
             preload_history=True,             # 是否预加载历史K线
             history_lookback_bars=50,         # 预加载K线数量
             adjust_type='1',                  # 复权类型
+            
+            # -------- 数据窗口配置 --------
+            lookback_bars=500,                # K线/TICK回溯窗口 (0=不限制，策略get_klines返回的最大条数)
             
             # -------- 回调模式配置 --------
             enable_tick_callback=False,       # TICK回调模式
