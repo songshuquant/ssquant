@@ -1,0 +1,50 @@
+{
+  "ai_settings": {
+    "provider": "DeepSeek",
+    "api_key": "",
+    "model": "deepseek-chat",
+    "temperature": 0.7,
+    "base_url": "https://api.deepseek.com/v1"
+  },
+  "backtest_params": {
+    "strategy_mode": "single",
+    "symbol": "rb888",
+    "start_date": "2025-12-01",
+    "end_date": "2026-01-31",
+    "kline_period": "5m",
+    "adjust_type": "1",
+    "initial_capital": 1000000,
+    "commission": 0.0001,
+    "margin_rate": 0.1,
+    "price_tick": 1,
+    "contract_multiplier": 10,
+    "slippage_ticks": 1,
+    "lookback_bars": 500,
+    "align_data": true,
+    "fill_method": "ffill",
+    "data_sources": [
+      {
+        "adjust_type": "1",
+        "contract_multiplier": 10,
+        "kline_period": "15m",
+        "price_tick": 1,
+        "slippage_ticks": 1,
+        "symbol": "rb888"
+      },
+      {
+        "adjust_type": "1",
+        "contract_multiplier": 10,
+        "kline_period": "5m",
+        "price_tick": 1,
+        "slippage_ticks": 1,
+        "symbol": "rb888"
+      }
+    ]
+  },
+  "auto_settings": {
+    "auto_backtest": true,
+    "auto_debug": true,
+    "auto_iterate": true,
+    "max_iterations": 5
+  }
+}

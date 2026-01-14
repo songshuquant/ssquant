@@ -1,0 +1,3314 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSQuant AI Agent - 量化策略智能体</title>
+    
+    <!-- Monaco Editor -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/editor/editor.main.min.css">
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Marked for Markdown -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    
+    <style>
+        :root {
+            --bg-primary: #0a0e17;
+            --bg-secondary: #111827;
+            --bg-tertiary: #1a2234;
+            --bg-card: #1e293b;
+            --bg-hover: #2a3a52;
+            --border-color: #2d3a4f;
+            --border-active: #3b82f6;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --accent-blue: #3b82f6;
+            --accent-cyan: #06b6d4;
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --accent-yellow: #f59e0b;
+            --accent-purple: #8b5cf6;
+            --gradient-primary: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+            --gradient-success: linear-gradient(135deg, #10b981 0%, #06b6d4 100%);
+            --shadow-lg: 0 10px 40px rgba(0, 0, 0, 0.4);
+            --shadow-glow: 0 0 20px rgba(59, 130, 246, 0.3);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Header */
+        .header {
+            height: 56px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+        }
+
+        .header-left { display: flex; align-items: center; gap: 12px; }
+
+        .logo {
+            width: 36px; height: 36px;
+            background: var(--gradient-primary);
+            border-radius: 10px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 20px;
+        }
+
+        .app-title {
+            font-size: 18px; font-weight: 600;
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .header-right { display: flex; align-items: center; gap: 12px; }
+
+        .status-indicator {
+            display: flex; align-items: center; gap: 8px;
+            padding: 6px 14px;
+            background: var(--bg-tertiary);
+            border-radius: 20px; font-size: 13px;
+        }
+
+        .status-dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: var(--accent-green);
+            animation: pulse 2s infinite;
+        }
+        .status-dot.offline { background: var(--text-muted); animation: none; }
+        .status-dot.running { background: var(--accent-yellow); }
+
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+        .btn-icon {
+            width: 36px; height: 36px; border: none;
+            background: var(--bg-tertiary); border-radius: 8px;
+            color: var(--text-secondary); cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 18px; transition: all 0.2s;
+        }
+        .btn-icon:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+        /* Workspace Button & Name */
+        .workspace-btn { margin-right: 8px; }
+        .workspace-name {
+            margin-left: 12px; padding: 4px 12px;
+            background: var(--bg-tertiary); border-radius: 6px;
+            font-size: 13px; color: var(--text-secondary);
+            max-width: 200px; overflow: hidden;
+            text-overflow: ellipsis; white-space: nowrap;
+        }
+
+        /* Workspace Sidebar */
+        .workspace-sidebar {
+            position: fixed; top: 0; left: -320px;
+            width: 320px; height: 100vh;
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border-color);
+            z-index: 1001; transition: left 0.3s ease;
+            display: flex; flex-direction: column;
+        }
+        .workspace-sidebar.open { left: 0; }
+        
+        .sidebar-overlay {
+            position: fixed; top: 0; left: 0;
+            width: 100vw; height: 100vh;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000; opacity: 0;
+            visibility: hidden; transition: all 0.3s;
+        }
+        .sidebar-overlay.open { opacity: 1; visibility: visible; }
+
+        .sidebar-header {
+            padding: 16px 20px; display: flex;
+            justify-content: space-between; align-items: center;
+            border-bottom: 1px solid var(--border-color);
+            background: var(--bg-tertiary);
+        }
+        .sidebar-header h3 { font-size: 16px; font-weight: 600; margin: 0; }
+
+        .sidebar-actions { padding: 16px; border-bottom: 1px solid var(--border-color); }
+        .sidebar-actions .btn { width: 100%; justify-content: center; }
+
+        .workspace-list { flex: 1; overflow-y: auto; padding: 12px; }
+
+        .workspace-item {
+            padding: 14px 16px; margin-bottom: 8px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 10px; cursor: pointer;
+            transition: all 0.2s;
+        }
+        .workspace-item:hover { border-color: var(--accent-blue); background: var(--bg-hover); }
+        .workspace-item.active { border-color: var(--accent-blue); background: rgba(59, 130, 246, 0.1); }
+
+        .workspace-item-header { display: flex; justify-content: space-between; align-items: center; }
+        .workspace-item-name { font-size: 14px; font-weight: 500; color: var(--text-primary); }
+        .workspace-item-meta { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
+        .workspace-item-actions { display: flex; gap: 4px; }
+        .workspace-item-actions button {
+            width: 24px; height: 24px; border: none;
+            background: transparent; color: var(--text-muted);
+            border-radius: 4px; cursor: pointer; font-size: 12px;
+        }
+        .workspace-item-actions button:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+        .workspace-item-actions button.delete:hover { color: var(--accent-red); }
+
+        /* Main Layout */
+        .main-container { display: flex; height: calc(100vh - 56px); }
+
+        .panel {
+            display: flex; flex-direction: column;
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border-color);
+        }
+        .panel:last-child { border-right: none; }
+
+        .panel-header {
+            height: 48px; padding: 0 16px;
+            display: flex; align-items: center; justify-content: space-between;
+            border-bottom: 1px solid var(--border-color);
+            background: var(--bg-tertiary);
+        }
+
+        .panel-title {
+            font-size: 14px; font-weight: 600;
+            display: flex; align-items: center; gap: 8px;
+        }
+
+        .panel-content {
+            flex: 1; overflow: hidden;
+            display: flex; flex-direction: column;
+        }
+
+        /* Left Panel - Code Editor */
+        .panel-code { width: 35%; min-width: 400px; }
+
+        .editor-tabs {
+            display: flex;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .editor-tab {
+            padding: 10px 16px; font-size: 13px;
+            color: var(--text-secondary); cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        .editor-tab:hover { color: var(--text-primary); background: var(--bg-hover); }
+        .editor-tab.active { color: var(--accent-blue); border-bottom-color: var(--accent-blue); }
+
+        #editor-container, #diff-container { flex: 1; min-height: 0; }
+
+        .editor-actions {
+            display: flex; gap: 8px; padding: 12px;
+            background: var(--bg-tertiary);
+            border-top: 1px solid var(--border-color);
+        }
+
+        .btn {
+            padding: 8px 16px; border: none; border-radius: 6px;
+            font-size: 13px; font-weight: 500; cursor: pointer;
+            display: flex; align-items: center; gap: 6px;
+            transition: all 0.2s;
+        }
+        .btn-primary { background: var(--gradient-primary); color: white; }
+        .btn-primary:hover { transform: translateY(-1px); box-shadow: var(--shadow-glow); }
+        .btn-secondary { background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border-color); }
+        .btn-secondary:hover { background: var(--bg-hover); }
+        .btn-success { background: #10b981; color: white; border: none; }
+        .btn-success:hover { background: #059669; }
+        .btn-danger { background: #ef4444; color: white; border: none; }
+        .btn-danger:hover { background: #dc2626; }
+        .btn-warning { background: #f59e0b; color: white; border: none; }
+        .btn-warning:hover { background: #d97706; }
+        .btn-xs { padding: 4px 8px; font-size: 11px; }
+        .tab-actions { padding: 8px 12px; display: flex; justify-content: flex-end; border-bottom: 1px solid var(--border-color); }
+        .delete-btn { opacity: 0; transition: opacity 0.2s; padding: 2px 6px; font-size: 11px; background: transparent; color: #ef4444; border: none; cursor: pointer; }
+        .report-item:hover .delete-btn, .history-item:hover .delete-btn { opacity: 1; }
+        .delete-btn:hover { background: rgba(239, 68, 68, 0.2); border-radius: 4px; }
+        .btn-success { background: var(--gradient-success); color: white; }
+        .btn-sm { padding: 6px 12px; font-size: 12px; }
+
+        /* Center Panel - Chat */
+        .panel-chat { width: 35%; min-width: 380px; }
+
+        .chat-messages {
+            flex: 1; overflow-y: auto; padding: 16px;
+            display: flex; flex-direction: column; gap: 16px;
+        }
+
+        .message { max-width: 90%; animation: fadeIn 0.3s ease; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        .message-user { align-self: flex-end; }
+        .message-ai { align-self: flex-start; }
+
+        .message-content {
+            padding: 12px 16px; border-radius: 12px;
+            font-size: 14px; line-height: 1.6;
+        }
+        .message-user .message-content {
+            background: var(--gradient-primary); color: white;
+            border-bottom-right-radius: 4px;
+        }
+        .message-ai .message-content {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-bottom-left-radius: 4px;
+        }
+        .message-ai .message-content code {
+            background: var(--bg-tertiary);
+            padding: 2px 6px; border-radius: 4px;
+            font-family: 'JetBrains Mono', monospace; font-size: 13px;
+        }
+        .message-ai .message-content pre {
+            background: var(--bg-primary);
+            padding: 12px; border-radius: 8px;
+            overflow-x: auto; margin: 12px 0;
+        }
+        .message-ai .message-content pre code { background: none; padding: 0; }
+        
+        /* 精确编辑模式状态提示 */
+        .edit-status-badge {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 8px 14px; margin: 12px 0;
+            background: rgba(16, 185, 129, 0.15);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 8px; color: var(--accent-green);
+            font-size: 13px; font-weight: 500;
+        }
+        .edit-status-badge.warning {
+            background: rgba(245, 158, 11, 0.15);
+            border-color: rgba(245, 158, 11, 0.3);
+            color: var(--accent-yellow);
+        }
+        .edit-status-badge .icon { font-size: 16px; }
+
+        .message-actions { display: flex; gap: 8px; margin-top: 8px; }
+
+        .message-action-btn {
+            padding: 4px 10px; font-size: 12px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 4px; color: var(--text-secondary);
+            cursor: pointer; transition: all 0.2s;
+        }
+        .message-action-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+        /* AI操作按钮 */
+        .ai-action-btn {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 8px 16px; font-size: 13px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px; color: var(--text-primary);
+            cursor: pointer; transition: all 0.2s;
+        }
+        .ai-action-btn:hover { background: var(--bg-hover); border-color: var(--accent-blue); }
+        .ai-action-btn.primary {
+            background: var(--accent-blue); border-color: var(--accent-blue); color: white;
+        }
+        .ai-action-btn.primary:hover { background: #2563eb; }
+        .ai-action-btn.danger { background: var(--accent-red); border-color: var(--accent-red); color: white; }
+        .ai-action-btn.danger:hover { background: #dc2626; }
+
+        .welcome-message { text-align: center; padding: 60px 30px; }
+        .welcome-icon {
+            width: 80px; height: 80px;
+            background: var(--gradient-primary);
+            border-radius: 20px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 40px; margin: 0 auto 24px;
+            box-shadow: var(--shadow-glow);
+        }
+        .welcome-title { font-size: 22px; font-weight: 600; margin-bottom: 12px; }
+        .welcome-subtitle { color: var(--text-secondary); font-size: 14px; margin-bottom: 30px; }
+        .welcome-features { text-align: left; max-width: 280px; margin: 0 auto; }
+        .welcome-feature { display: flex; align-items: center; gap: 12px; padding: 10px 0; color: var(--text-secondary); font-size: 14px; }
+        .welcome-feature-icon { width: 32px; height: 32px; background: var(--bg-card); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+
+        /* Chat Input */
+        .chat-input-area {
+            padding: 16px;
+            background: var(--bg-tertiary);
+            border-top: 1px solid var(--border-color);
+        }
+
+        .auto-toggles { display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+
+        .toggle-item {
+            display: flex; align-items: center; gap: 8px;
+            padding: 6px 12px; background: var(--bg-card);
+            border-radius: 20px; font-size: 12px;
+            cursor: pointer; transition: all 0.2s;
+            border: 1px solid var(--border-color);
+        }
+        .toggle-item:hover { border-color: var(--accent-blue); }
+        .toggle-item.active {
+            background: rgba(59, 130, 246, 0.2);
+            border-color: var(--accent-blue);
+            color: var(--accent-blue);
+        }
+
+        .toggle-switch {
+            width: 28px; height: 16px;
+            background: var(--bg-tertiary);
+            border-radius: 8px; position: relative;
+            transition: all 0.2s;
+        }
+        .toggle-item.active .toggle-switch { background: var(--accent-blue); }
+        .toggle-switch::after {
+            content: ''; width: 12px; height: 12px;
+            background: white; border-radius: 50%;
+            position: absolute; top: 2px; left: 2px;
+            transition: all 0.2s;
+        }
+        .toggle-item.active .toggle-switch::after { left: 14px; }
+
+        .chat-input-wrapper { display: flex; gap: 10px; align-items: flex-end; }
+
+        .chat-input {
+            flex: 1; min-height: 44px; max-height: 150px;
+            padding: 12px 16px; background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px; color: var(--text-primary);
+            font-size: 14px; resize: none;
+            font-family: inherit; line-height: 1.5;
+        }
+        .chat-input:focus { outline: none; border-color: var(--accent-blue); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
+        .chat-input::placeholder { color: var(--text-muted); }
+
+        .send-btn {
+            width: 44px; height: 44px; border: none;
+            background: var(--gradient-primary);
+            border-radius: 12px; color: white; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 20px; transition: all 0.2s; flex-shrink: 0;
+        }
+        .send-btn:hover { transform: translateY(-2px); box-shadow: var(--shadow-glow); }
+        .send-btn:disabled { background: var(--bg-card); cursor: not-allowed; transform: none; box-shadow: none; }
+
+        .scroll-to-bottom-btn {
+            position: absolute; bottom: 140px; left: 50%; transform: translateX(-50%);
+            width: 36px; height: 36px; border-radius: 50%;
+            background: var(--bg-card); border: 1px solid var(--border-color);
+            color: var(--text-primary); cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 18px; transition: all 0.2s;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3); z-index: 10;
+        }
+        .scroll-to-bottom-btn:hover {
+            background: var(--bg-hover); border-color: var(--accent-primary);
+            transform: translateX(-50%) scale(1.1);
+        }
+
+        .stop-btn-container {
+            display: flex; justify-content: center; margin-bottom: 12px;
+        }
+        .stop-btn {
+            display: flex; align-items: center; gap: 8px;
+            padding: 8px 20px; border: 1px solid var(--border-color);
+            background: var(--bg-card);
+            border-radius: 20px; color: var(--text-primary); cursor: pointer;
+            font-size: 13px; transition: all 0.2s;
+        }
+        .stop-btn:hover { background: var(--bg-hover); border-color: var(--accent-red); }
+        .stop-btn .stop-icon { 
+            color: var(--accent-red); font-size: 10px;
+        }
+
+        /* Right Panel */
+        .panel-right { width: 30%; min-width: 320px; }
+
+        .right-tabs { display: flex; background: var(--bg-tertiary); }
+        .right-tab {
+            flex: 1; padding: 12px; text-align: center;
+            font-size: 13px; color: var(--text-secondary);
+            cursor: pointer; border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        .right-tab:hover { color: var(--text-primary); }
+        .right-tab.active { color: var(--accent-blue); border-bottom-color: var(--accent-blue); }
+
+        .right-content { flex: 1; overflow-y: auto; padding: 16px; }
+        .tab-pane { display: none; }
+        .tab-pane.active { display: block; }
+
+        /* Report List */
+        .report-list { display: flex; flex-direction: column; gap: 8px; }
+        .report-item {
+            padding: 12px; background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 8px; cursor: pointer;
+            transition: all 0.2s;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .report-item:hover { border-color: var(--accent-blue); background: var(--bg-hover); }
+        .report-item-content { flex: 1; }
+        .report-item-name { font-size: 13px; color: var(--text-primary); margin-bottom: 4px; word-break: break-all; }
+        .report-item-time { font-size: 11px; color: var(--text-muted); }
+
+        .no-data { text-align: center; padding: 40px 20px; color: var(--text-muted); }
+        .no-data-icon { font-size: 48px; margin-bottom: 16px; }
+
+        /* History */
+        .history-list { display: flex; flex-direction: column; gap: 8px; }
+        .history-item {
+            padding: 12px; background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 8px; transition: all 0.2s;
+        }
+        .history-item:hover { border-color: var(--accent-blue); }
+        .history-item-header { display: flex; align-items: center; margin-bottom: 6px; gap: 8px; }
+        .history-item-time { font-size: 12px; color: var(--text-muted); flex-shrink: 0; }
+        .history-item-badge { padding: 2px 8px; background: var(--accent-green); border-radius: 4px; font-size: 10px; color: white; flex-shrink: 0; text-align: center; min-width: 32px; }
+        .history-item-name { font-size: 13px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .history-item-actions { display: flex; gap: 6px; margin-top: 8px; }
+        .auto-save-tag { background: var(--accent-yellow); color: #000; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-left: 6px; }
+
+        /* Settings */
+        .settings-section { margin-bottom: 24px; }
+        .settings-section-title {
+            font-size: 14px; font-weight: 600;
+            color: var(--accent-cyan);
+            margin-bottom: 12px;
+            display: flex; align-items: center; gap: 8px;
+        }
+        .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .settings-item { display: flex; flex-direction: column; gap: 6px; }
+        .settings-item.full-width { grid-column: span 2; }
+        .settings-label { font-size: 12px; color: var(--text-muted); }
+        .settings-input, .settings-select {
+            padding: 10px 12px; background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 6px; color: var(--text-primary); font-size: 13px;
+        }
+        .settings-input:focus, .settings-select:focus { outline: none; border-color: var(--accent-blue); }
+
+        .backtest-params { background: var(--bg-card); border-radius: 8px; padding: 16px; border: 1px solid var(--border-color); }
+
+        /* Data Sources */
+        .data-sources-section { margin-top: 16px; }
+        .data-sources-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .data-sources-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+        .btn-add-source {
+            padding: 6px 12px; background: var(--accent-green); color: white;
+            border: none; border-radius: 6px; font-size: 12px; cursor: pointer;
+        }
+        .btn-add-source:hover { background: #16a34a; }
+        .data-source-card {
+            background: var(--bg-primary); border: 1px solid var(--border-color);
+            border-radius: 8px; padding: 12px; margin-bottom: 10px;
+        }
+        .data-source-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border-color);
+        }
+        .data-source-index { 
+            font-size: 12px; font-weight: 600; color: var(--accent-blue);
+            background: rgba(59,130,246,0.1); padding: 2px 8px; border-radius: 4px;
+        }
+        .btn-remove-source {
+            padding: 4px 8px; background: var(--accent-red); color: white;
+            border: none; border-radius: 4px; font-size: 11px; cursor: pointer;
+        }
+        .btn-remove-source:hover { background: #dc2626; }
+        .data-source-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+        .data-source-item { display: flex; flex-direction: column; gap: 4px; }
+        .data-source-item label { font-size: 11px; color: var(--text-muted); }
+        .data-source-item input, .data-source-item select {
+            padding: 6px 8px; background: var(--bg-card); border: 1px solid var(--border-color);
+            border-radius: 4px; color: var(--text-primary); font-size: 12px;
+        }
+
+        /* Run Log */
+        .run-log {
+            background: var(--bg-primary); border-radius: 8px;
+            padding: 12px; font-family: 'JetBrains Mono', monospace;
+            font-size: 12px; max-height: 200px; overflow-y: auto;
+            margin-top: 16px;
+        }
+        .log-line { padding: 2px 0; color: var(--text-secondary); }
+        .log-line.info { color: var(--accent-blue); }
+        .log-line.success { color: var(--accent-green); }
+        .log-line.error { color: var(--accent-red); }
+        .log-line.warning { color: var(--accent-yellow); }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 1000; opacity: 0; visibility: hidden;
+            transition: all 0.3s;
+        }
+        .modal-overlay.active { opacity: 1; visibility: visible; }
+
+        .modal {
+            background: var(--bg-secondary);
+            border-radius: 16px; width: 90%;
+            max-height: 90vh; overflow: hidden;
+            transform: scale(0.9); transition: all 0.3s;
+            display: flex; flex-direction: column;
+        }
+        .modal-overlay.active .modal { transform: scale(1); }
+        .modal-sm { max-width: 500px; }
+        .modal-md { max-width: 700px; }
+        .modal-lg { max-width: 1200px; }
+        .modal-xl { max-width: 95%; height: 90vh; }
+
+        .modal-header {
+            padding: 20px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex; align-items: center; justify-content: space-between;
+            flex-shrink: 0;
+        }
+        .modal-title { font-size: 18px; font-weight: 600; }
+        .modal-close {
+            width: 32px; height: 32px; border: none;
+            background: var(--bg-card); border-radius: 8px;
+            color: var(--text-secondary); cursor: pointer; font-size: 18px;
+        }
+        .modal-close:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+        .modal-content {
+            padding: 20px; overflow-y: auto;
+            flex: 1; min-height: 0;
+        }
+        .modal-content.no-padding { padding: 0; }
+
+        .modal-footer {
+            padding: 16px 20px;
+            border-top: 1px solid var(--border-color);
+            display: flex; justify-content: flex-end; gap: 10px;
+            flex-shrink: 0;
+        }
+
+        /* Loading */
+        .loading-spinner {
+            display: inline-block; width: 16px; height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top-color: white; border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Typing Indicator */
+        .typing-indicator {
+            display: flex; gap: 4px; padding: 12px 16px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px; border-bottom-left-radius: 4px;
+            width: fit-content;
+        }
+        .typing-dot {
+            width: 8px; height: 8px;
+            background: var(--text-muted);
+            border-radius: 50%;
+            animation: typingBounce 1.4s infinite ease-in-out;
+        }
+        .typing-dot:nth-child(1) { animation-delay: -0.32s; }
+        .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+        @keyframes typingBounce {
+            0%, 80%, 100% { transform: scale(0.8); opacity: 0.5; }
+            40% { transform: scale(1); opacity: 1; }
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: var(--bg-primary); }
+        ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+        /* Toast */
+        .toast {
+            position: fixed; bottom: 20px; left: 50%;
+            transform: translateX(-50%);
+            padding: 12px 24px; border-radius: 8px;
+            font-size: 14px; z-index: 9999;
+            animation: fadeIn 0.3s ease;
+        }
+        .toast-success { background: var(--accent-green); color: white; }
+        .toast-error { background: var(--accent-red); color: white; }
+
+        /* Strategy Mode Tabs */
+        .mode-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+        .mode-tab {
+            padding: 8px 16px; font-size: 12px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 6px; cursor: pointer;
+            transition: all 0.2s;
+        }
+        .mode-tab:hover { border-color: var(--accent-blue); }
+        .mode-tab.active {
+            background: var(--accent-blue);
+            border-color: var(--accent-blue);
+            color: white;
+        }
+
+        .mode-content { display: none; }
+        .mode-content.active { display: block; }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-left">
+            <button class="btn-icon workspace-btn" onclick="toggleWorkspaceSidebar()" title="工作区">☰</button>
+            <div class="logo">🐿️</div>
+            <span class="app-title">SSQuant AI Agent</span>
+            <span class="workspace-name" id="currentWorkspaceName" title="点击左侧菜单选择或创建工作区">全部数据</span>
+        </div>
+        <div class="header-right">
+            <div class="status-indicator">
+                <span class="status-dot" id="statusDot"></span>
+                <span id="statusText">就绪</span>
+            </div>
+            <button class="btn-icon" onclick="openSettingsModal()" title="设置">⚙️</button>
+            <button class="btn-icon" onclick="openExamplesModal()" title="示例策略">📚</button>
+        </div>
+    </header>
+
+    <!-- Workspace Sidebar -->
+    <div class="workspace-sidebar" id="workspaceSidebar">
+        <div class="sidebar-header">
+            <h3>📁 工作区</h3>
+            <button class="btn-icon" onclick="toggleWorkspaceSidebar()">×</button>
+        </div>
+        <div class="sidebar-actions">
+            <button class="btn btn-primary btn-sm" onclick="createNewWorkspace()">
+                <span>+</span> 新建工作区
+            </button>
+        </div>
+        <div class="workspace-list" id="workspaceList">
+            <div class="no-data">
+                <p>暂无工作区</p>
+            </div>
+        </div>
+    </div>
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleWorkspaceSidebar()"></div>
+
+    <!-- Main Container -->
+    <div class="main-container">
+        <!-- Left Panel - Code Editor -->
+        <div class="panel panel-code">
+            <div class="panel-header">
+                <span class="panel-title">📝 策略代码</span>
+                <button class="btn btn-secondary btn-sm" onclick="copyCode()">📋 复制</button>
+            </div>
+            <div class="panel-content">
+                <div class="editor-tabs">
+                    <div class="editor-tab active" data-tab="editor" onclick="switchEditorTab('editor')">编辑器</div>
+                    <div class="editor-tab" data-tab="diff" onclick="switchEditorTab('diff')">差异对比</div>
+                </div>
+                <div id="editor-container"></div>
+                <div id="diff-container" style="display: none;"></div>
+                <div class="editor-actions">
+                    <button class="btn btn-success" onclick="runBacktest()">▶️ 运行回测</button>
+                    <button class="btn btn-secondary" onclick="saveStrategy()">💾 保存版本</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Center Panel - AI Chat -->
+        <div class="panel panel-chat">
+            <div class="panel-header">
+                <span class="panel-title">🤖 AI 助手</span>
+                <button class="btn btn-secondary btn-sm" onclick="clearChat()">🗑️ 清空</button>
+            </div>
+            <div class="panel-content" style="position: relative;">
+                <div class="chat-messages" id="chatMessages">
+                    <div class="welcome-message" id="welcomeMessage">
+                        <div class="welcome-icon">🤖</div>
+                        <h2 class="welcome-title">欢迎使用 SSQuant AI Agent</h2>
+                        <p class="welcome-subtitle">输入你的需求，我可以帮你：</p>
+                        <div class="welcome-features">
+                            <div class="welcome-feature"><span class="welcome-feature-icon">📝</span><span>生成量化交易策略代码</span></div>
+                            <div class="welcome-feature"><span class="welcome-feature-icon">📊</span><span>自动回测并分析结果</span></div>
+                            <div class="welcome-feature"><span class="welcome-feature-icon">🔧</span><span>调试和优化策略</span></div>
+                            <div class="welcome-feature"><span class="welcome-feature-icon">💡</span><span>解答量化交易问题</span></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chat-input-area">
+                    <div class="auto-toggles">
+                        <div class="toggle-item" id="toggleBacktest" onclick="toggleAuto('backtest')">
+                            <span class="toggle-switch"></span><span>自动回测</span>
+                        </div>
+                        <div class="toggle-item" id="toggleDebug" onclick="toggleAuto('debug')">
+                            <span class="toggle-switch"></span><span>自动调试</span>
+                        </div>
+                        <div class="toggle-item" id="toggleIterate" onclick="toggleAuto('iterate')">
+                            <span class="toggle-switch"></span><span>自动迭代</span>
+                        </div>
+                    </div>
+                    <!-- 滚动到底部按钮 -->
+                    <button class="scroll-to-bottom-btn" id="scrollToBottomBtn" onclick="scrollToBottom()" style="display: none;">
+                        <span>↓</span>
+                    </button>
+                    <div class="stop-btn-container" id="stopBtnContainer" style="display: none;">
+                        <button class="stop-btn" id="stopBtn" onclick="stopGeneration()">
+                            <span class="stop-icon">■</span>
+                            <span>停止生成</span>
+                        </button>
+                    </div>
+                    <div class="chat-input-wrapper">
+                        <textarea class="chat-input" id="chatInput" 
+                                  placeholder="输入你的需求，例如：给我一个双均线策略" rows="1"></textarea>
+                        <button class="send-btn" id="sendBtn" onclick="sendMessage()">➤</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Panel -->
+        <div class="panel panel-right">
+ 
+            <div class="panel-content">
+                <div class="right-tabs">
+                    <div class="right-tab active" data-tab="report" onclick="switchRightTab('report')">报告</div>
+                    <div class="right-tab" data-tab="history" onclick="switchRightTab('history')">历史</div>
+                    <div class="right-tab" data-tab="params" onclick="switchRightTab('params')">参数及运行日志</div>
+                </div>
+                <div class="right-content">
+                    <!-- Report Tab -->
+                    <div class="tab-pane active" id="tabReport">
+                        <div class="tab-actions" id="reportActions" style="display: none;">
+                            <button class="btn btn-danger btn-xs" onclick="clearAllReports()">🗑️ 清空全部</button>
+                        </div>
+                        <div class="report-list" id="reportList">
+                            <div class="no-data">
+                                <div class="no-data-icon">📈</div>
+                                <p>暂无回测报告</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- History Tab -->
+                    <div class="tab-pane" id="tabHistory">
+                        <div class="tab-actions" id="historyActions" style="display: none;">
+                            <button class="btn btn-danger btn-xs" onclick="clearAllHistory()">🗑️ 清空全部</button>
+                        </div>
+                        <div class="history-list" id="historyList"></div>
+                    </div>
+
+                    <!-- Params Tab -->
+                    <div class="tab-pane" id="tabParams">
+                        <div class="settings-section">
+                            <div class="settings-section-title">📊 回测参数</div>
+                            
+                            <!-- Strategy Mode -->
+                            <div class="mode-tabs">
+                                <div class="mode-tab active" data-mode="single" onclick="switchStrategyMode('single')">单品种</div>
+                                <div class="mode-tab" data-mode="multi" onclick="switchStrategyMode('multi')">多品种/跨周期</div>
+                                <div class="mode-tab" data-mode="tick" onclick="switchStrategyMode('tick')">TICK高频</div>
+                            </div>
+
+                            <!-- Single Mode -->
+                            <div class="mode-content active" id="modeSingle">
+                                <div class="backtest-params">
+                                    <div class="settings-grid">
+                                        <div class="settings-item">
+                                            <label class="settings-label">合约代码</label>
+                                            <input type="text" class="settings-input" id="paramSymbol" value="rb888" placeholder="如rb888">
+                                        </div>
+                                        <div class="settings-item">
+                                            <label class="settings-label">K线周期</label>
+                                            <select class="settings-select" id="paramPeriod">
+                                                <option value="1m">1分钟</option>
+                                                <option value="5m" selected>5分钟</option>
+                                                <option value="15m">15分钟</option>
+                                                <option value="30m">30分钟</option>
+                                                <option value="1h">1小时</option>
+                                                <option value="1d">日线</option>
+                                            </select>
+                                        </div>
+                                        <div class="settings-item">
+                                            <label class="settings-label">开始日期</label>
+                                            <input type="date" class="settings-input" id="paramStartDate" value="2025-12-01">
+                                        </div>
+                                        <div class="settings-item">
+                                            <label class="settings-label">结束日期</label>
+                                            <input type="date" class="settings-input" id="paramEndDate" value="2026-01-31">
+                                        </div>
+                                        <div class="settings-item">
+                                            <label class="settings-label">初始资金</label>
+                                            <input type="number" class="settings-input" id="paramCapital" value="1000000">
+                                        </div>
+                                        <div class="settings-item">
+                                            <label class="settings-label">手续费率</label>
+                                            <input type="text" class="settings-input" id="paramCommission" value="0.0001">
+                                        </div>
+                                        <div class="settings-item">
+                                            <label class="settings-label">保证金率</label>
+                                            <input type="text" class="settings-input" id="paramMargin" value="0.1">
+                                        </div>
+                                        <div class="settings-item">
+                                            <label class="settings-label">合约乘数</label>
+                                            <input type="number" class="settings-input" id="paramMultiplier" value="10">
+                                        </div>
+                                        <div class="settings-item">
+                                            <label class="settings-label">最小变动价位</label>
+                                            <input type="text" class="settings-input" id="paramPriceTick" value="1">
+                                        </div>
+                                        <div class="settings-item">
+                                            <label class="settings-label">滑点跳数</label>
+                                            <input type="number" class="settings-input" id="paramSlippage" value="1">
+                                        </div>
+                                        <div class="settings-item">
+                                            <label class="settings-label">复权类型</label>
+                                            <select class="settings-select" id="paramAdjust">
+                                                <option value="0">不复权</option>
+                                                <option value="1" selected>后复权</option>
+                                            </select>
+                                        </div>
+                                        <div class="settings-item">
+                                            <label class="settings-label">回溯窗口</label>
+                                            <input type="number" class="settings-input" id="paramLookback" value="500">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Multi Mode -->
+                            <div class="mode-content" id="modeMulti">
+                                <div class="backtest-params">
+                                    <div class="settings-grid">
+                                        <div class="settings-item">
+                                            <label class="settings-label">开始日期</label>
+                                            <input type="date" class="settings-input" id="paramMultiStartDate" value="2025-12-01">
+                                        </div>
+                                        <div class="settings-item">
+                                            <label class="settings-label">结束日期</label>
+                                            <input type="date" class="settings-input" id="paramMultiEndDate" value="2026-01-31">
+                                        </div>
+                                        <div class="settings-item">
+                                            <label class="settings-label">初始资金</label>
+                                            <input type="number" class="settings-input" id="paramMultiCapital" value="1000000">
+                                        </div>
+                                        <div class="settings-item">
+                                            <label class="settings-label">手续费率</label>
+                                            <input type="text" class="settings-input" id="paramMultiCommission" value="0.0001">
+                                        </div>
+                                        <div class="settings-item">
+                                            <label class="settings-label">保证金率</label>
+                                            <input type="text" class="settings-input" id="paramMultiMargin" value="0.1">
+                                        </div>
+                                        <div class="settings-item">
+                                            <label class="settings-label">回溯窗口</label>
+                                            <input type="number" class="settings-input" id="paramMultiLookback" value="500">
+                                        </div>
+                                        <div class="settings-item full-width">
+                                            <label class="settings-label">数据对齐 (套利/跨周期策略必须开启)</label>
+                                            <select class="settings-select" id="paramAlignData">
+                                                <option value="false">关闭 (独立策略)</option>
+                                                <option value="true" selected>开启 (套利/跨周期)</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- 数据源配置 -->
+                                    <div class="data-sources-section">
+                                        <div class="data-sources-header">
+                                            <span class="data-sources-title">📊 数据源配置</span>
+                                            <button class="btn-add-source" onclick="addDataSource()">+ 添加数据源</button>
+                                        </div>
+                                        <div class="data-sources-list" id="dataSourcesList">
+                                            <!-- 动态生成数据源 -->
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Tick Mode -->
+                            <div class="mode-content" id="modeTick">
+                                <div class="backtest-params">
+                                    <div class="settings-grid">
+                                        <div class="settings-item">
+                                            <label class="settings-label">合约代码</label>
+                                            <input type="text" class="settings-input" id="paramTickSymbol" value="au888">
+                                        </div>
+                                        <div class="settings-item">
+                                            <label class="settings-label">数据类型</label>
+                                            <input type="text" class="settings-input" value="tick" disabled>
+                                        </div>
+                                        <div class="settings-item">
+                                            <label class="settings-label">开始日期</label>
+                                            <input type="date" class="settings-input" id="paramTickStartDate" value="2026-01-01">
+                                        </div>
+                                        <div class="settings-item">
+                                            <label class="settings-label">结束日期</label>
+                                            <input type="date" class="settings-input" id="paramTickEndDate" value="2026-01-31">
+                                        </div>
+                                        <div class="settings-item">
+                                            <label class="settings-label">最小变动价位</label>
+                                            <input type="text" class="settings-input" id="paramTickPriceTick" value="0.02">
+                                        </div>
+                                        <div class="settings-item">
+                                            <label class="settings-label">合约乘数</label>
+                                            <input type="number" class="settings-input" id="paramTickMultiplier" value="1000">
+                                        </div>
+                                        <div class="settings-item">
+                                            <label class="settings-label">滑点跳数</label>
+                                            <input type="number" class="settings-input" id="paramTickSlippage" value="1">
+                                        </div>
+                                        <div class="settings-item">
+                                            <label class="settings-label">回溯窗口</label>
+                                            <input type="number" class="settings-input" id="paramTickLookback" value="1000">
+                                        </div>
+                                    </div>
+                                    <p style="font-size: 12px; color: var(--text-muted); margin-top: 12px;">
+                                        ⚠️ TICK数据只能从本地数据库获取，需先采集数据
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="settings-section">
+                            <div class="settings-section-title">📋 运行日志</div>
+                            <div class="run-log" id="runLog">
+                                <div class="log-line info">等待启动...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="modal-overlay" id="settingsModal">
+        <div class="modal modal-sm">
+            <div class="modal-header">
+                <span class="modal-title">⚙️ LLM 设置</span>
+                <button class="modal-close" onclick="closeModal('settingsModal')">×</button>
+            </div>
+            <div class="modal-content">
+                <div class="settings-grid">
+                    <div class="settings-item full-width">
+                        <label class="settings-label">API 接口地址 (支持 OpenAI 兼容格式)</label>
+                        <input type="text" class="settings-input" id="settingBaseUrl" 
+                               value="https://api.deepseek.com/v1" 
+                               placeholder="例如: https://api.openai.com/v1">
+                        <small style="color: var(--text-muted); font-size: 11px; margin-top: 4px;">
+                            支持 DeepSeek、OpenAI、Claude、通义千问等兼容接口
+                        </small>
+                    </div>
+                    <div class="settings-item">
+                        <label class="settings-label">模型名称</label>
+                        <input type="text" class="settings-input" id="settingModel" value="deepseek-chat"
+                               placeholder="例如: gpt-4o, claude-3-opus">
+                    </div>
+                    <div class="settings-item">
+                        <label class="settings-label">快捷选择</label>
+                        <select class="settings-select" id="settingProvider" onchange="onProviderChange()">
+                            <option value="Custom">自定义</option>
+                            <option value="DeepSeek">DeepSeek</option>
+                            <option value="OpenAI">OpenAI</option>
+                            <option value="Claude">Claude (API)</option>
+                            <option value="Qwen">通义千问</option>
+                            <option value="Moonshot">Moonshot</option>
+                            <option value="Zhipu">智谱 GLM</option>
+                        </select>
+                    </div>
+                    <div class="settings-item full-width">
+                        <label class="settings-label">API Key</label>
+                        <input type="password" class="settings-input" id="settingApiKey" placeholder="输入你的API Key">
+                    </div>
+                    <div class="settings-item full-width">
+                        <label class="settings-label">Temperature: <span id="tempValue">0.7</span></label>
+                        <input type="range" class="settings-input" id="settingTemp" min="0" max="2" step="0.1" value="0.7"
+                               oninput="document.getElementById('tempValue').textContent = this.value">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="resetSettings()">恢复默认</button>
+                <button class="btn btn-primary" onclick="saveSettings()">保存配置</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Examples Modal -->
+    <div class="modal-overlay" id="examplesModal">
+        <div class="modal modal-md">
+            <div class="modal-header">
+                <span class="modal-title">📚 示例策略</span>
+                <button class="modal-close" onclick="closeModal('examplesModal')">×</button>
+            </div>
+            <div class="modal-content">
+                <div class="history-list" id="examplesList"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Example Code Preview Modal -->
+    <div class="modal-overlay" id="codePreviewModal">
+        <div class="modal modal-xl">
+            <div class="modal-header">
+                <span class="modal-title" id="codePreviewTitle">📝 代码预览</span>
+                <button class="modal-close" onclick="closeModal('codePreviewModal')">×</button>
+            </div>
+            <div class="modal-content no-padding" style="height: calc(90vh - 140px);">
+                <div id="codePreviewEditor" style="width: 100%; height: 100%;"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('codePreviewModal')">关闭</button>
+                <button class="btn btn-primary" onclick="applyPreviewCode()">应用到编辑器</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Report Preview Modal -->
+    <div class="modal-overlay" id="reportModal">
+        <div class="modal modal-xl">
+            <div class="modal-header">
+                <span class="modal-title" id="reportModalTitle">📊 回测报告</span>
+                <button class="modal-close" onclick="closeModal('reportModal')">×</button>
+            </div>
+            <div class="modal-content no-padding" style="height: calc(90vh - 80px);">
+                <iframe id="reportIframe" style="width: 100%; height: 100%; border: none;"></iframe>
+            </div>
+        </div>
+    </div>
+
+    <!-- Monaco Editor -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
+    
+    <script>
+        // ==================== 全局变量 ====================
+        let editor = null;
+        let diffEditor = null;
+        let previewEditor = null;
+        let chatHistory = [];
+        let currentStrategy = '';
+        let previousStrategy = '';
+        let previewCode = '';
+        let autoSettings = { backtest: false, debug: false, iterate: false };
+        let isWaitingResponse = false;
+        let currentStrategyMode = 'single';
+        let autoSaveTimer = null;
+        let lastSavedCode = '';
+        
+        // 工作区管理
+        let currentWorkspaceId = null;
+        let workspaceList = [];
+        let workspaceSaveTimer = null;
+
+        // ==================== 初始化 ====================
+        require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs' } });
+
+        require(['vs/editor/editor.main'], function() {
+            monaco.editor.defineTheme('ssquant-dark', {
+                base: 'vs-dark', inherit: true,
+                rules: [
+                    { token: 'comment', foreground: '6A9955' },
+                    { token: 'keyword', foreground: 'C586C0' },
+                    { token: 'string', foreground: 'CE9178' },
+                    { token: 'number', foreground: 'B5CEA8' },
+                    { token: 'function', foreground: 'DCDCAA' },
+                ],
+                colors: {
+                    'editor.background': '#0a0e17',
+                    'editor.foreground': '#f1f5f9',
+                    'editor.lineHighlightBackground': '#1a2234',
+                    'editorLineNumber.foreground': '#64748b',
+                    'editorCursor.foreground': '#3b82f6',
+                    'editor.selectionBackground': '#264f78',
+                }
+            });
+
+            editor = monaco.editor.create(document.getElementById('editor-container'), {
+                value: '# 策略代码将在这里显示\n# 在左侧输入策略描述，生成策略',
+                language: 'python', theme: 'ssquant-dark',
+                fontSize: 14, fontFamily: "'JetBrains Mono', monospace",
+                minimap: { enabled: true }, scrollBeyondLastLine: false,
+                automaticLayout: true, tabSize: 4,
+            });
+
+            diffEditor = monaco.editor.createDiffEditor(document.getElementById('diff-container'), {
+                theme: 'ssquant-dark', fontSize: 14,
+                fontFamily: "'JetBrains Mono', monospace",
+                automaticLayout: true, readOnly: true, renderSideBySide: true
+            });
+
+            editor.onDidChangeModelContent(() => { 
+                currentStrategy = editor.getValue();
+                // 自动保存工作区（已包含节流）
+                autoSaveWorkspace();
+            });
+            loadSettings();
+            initChatScroll(); // 初始化智能滚动
+            // 先加载工作区，再加载报告和历史（这样才能正确过滤）
+            loadLastWorkspace().then(() => {
+                refreshReports();
+                loadHistory();
+            });
+        });
+
+        // 自适应输入框
+        const chatInput = document.getElementById('chatInput');
+        chatInput.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = Math.min(this.scrollHeight, 150) + 'px';
+        });
+        chatInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+        });
+
+        // ==================== 编辑器 ====================
+        function switchEditorTab(tab) {
+            document.querySelectorAll('.editor-tab').forEach(t => t.classList.remove('active'));
+            document.querySelector(`.editor-tab[data-tab="${tab}"]`)?.classList.add('active');
+            
+            if (tab === 'editor') {
+                isInDiffMode = false;
+                document.getElementById('editor-container').style.display = 'block';
+                document.getElementById('diff-container').style.display = 'none';
+                // 同步代码到编辑器
+                if (editor && currentStrategy) {
+                    editor.setValue(currentStrategy);
+                }
+            } else {
+                isInDiffMode = true;
+                document.getElementById('editor-container').style.display = 'none';
+                document.getElementById('diff-container').style.display = 'block';
+                updateDiffView();
+            }
+        }
+
+        function updateDiffView() {
+            if (diffEditor && previousStrategy) {
+                // 使用 inline diff 模式（红绿显示删除/新增）
+                diffEditor.updateOptions({ renderSideBySide: false });
+                diffEditor.setModel({
+                    original: monaco.editor.createModel(previousStrategy, 'python'),
+                    modified: monaco.editor.createModel(currentStrategy, 'python')
+                });
+            }
+        }
+
+        function setEditorCode(code, autoSave = true) {
+            previousStrategy = currentStrategy;
+            currentStrategy = code;
+            if (editor) {
+                editor.setValue(code);
+                // 切换到编辑器视图
+                switchEditorTab('editor');
+                // 滚动到顶部
+                editor.revealLine(1);
+            }
+            
+            // 代码变化时自动保存到历史版本
+            if (autoSave && code && code.length > 50) {
+                saveToHistory(code, true);
+            }
+        }
+
+        // 精确编辑模式：设置代码并自动显示 diff 视图
+        // 是否处于差异显示模式
+        let isInDiffMode = false;
+        
+        function setEditorCodeWithDiff(newCode, originalCode) {
+            previousStrategy = originalCode;
+            currentStrategy = newCode;
+            
+            // 始终更新主编辑器的代码（确保运行回测时使用最新代码）
+            if (editor) {
+                editor.setValue(newCode);
+            }
+            
+            // 如果有差异，切换到 inline diff 模式
+            if (originalCode && originalCode !== newCode) {
+                showInlineDiff(originalCode, newCode);
+            }
+            
+            // 代码变化时自动保存到历史版本
+            if (newCode && newCode.length > 50) {
+                saveToHistory(newCode, true);
+            }
+        }
+        
+        // 显示 inline diff（在编辑器位置显示差异）
+        function showInlineDiff(oldCode, newCode) {
+            isInDiffMode = true;
+            
+            // 隐藏普通编辑器，显示 diff 容器
+            document.getElementById('editor-container').style.display = 'none';
+            document.getElementById('diff-container').style.display = 'block';
+            
+            // 更新标签状态
+            document.querySelectorAll('.editor-tab').forEach(t => t.classList.remove('active'));
+            document.querySelector('.editor-tab[data-tab="diff"]')?.classList.add('active');
+            
+            // 设置 diff 编辑器为 inline 模式（不是并排）
+            if (diffEditor) {
+                diffEditor.updateOptions({ renderSideBySide: false });
+                diffEditor.setModel({
+                    original: monaco.editor.createModel(oldCode, 'python'),
+                    modified: monaco.editor.createModel(newCode, 'python')
+                });
+            }
+        }
+        
+        // 退出 diff 模式，恢复普通编辑器
+        function exitDiffMode() {
+            isInDiffMode = false;
+            
+            // 显示普通编辑器，隐藏 diff 容器
+            document.getElementById('editor-container').style.display = 'block';
+            document.getElementById('diff-container').style.display = 'none';
+            
+            // 更新标签状态
+            document.querySelectorAll('.editor-tab').forEach(t => t.classList.remove('active'));
+            document.querySelector('.editor-tab[data-tab="editor"]')?.classList.add('active');
+            
+            // 同步代码到普通编辑器
+            if (editor) {
+                editor.setValue(currentStrategy);
+            }
+        }
+
+        function copyCode() {
+            navigator.clipboard.writeText(editor.getValue()).then(() => showToast('代码已复制'));
+        }
+
+        // ==================== AI 聊天（流式） ====================
+        let currentAbortController = null;
+
+        async function sendMessage() {
+            const input = document.getElementById('chatInput');
+            const message = input.value.trim();
+            
+            if (!message) return;
+            if (isWaitingResponse) {
+                showToast('请等待当前对话完成', 'warning');
+                return;
+            }
+
+            const welcomeEl = document.getElementById('welcomeMessage');
+            if (welcomeEl) welcomeEl.style.display = 'none';
+            addMessage('user', message);
+            input.value = '';
+            input.style.height = 'auto';
+            setWaitingState(true);
+            
+            // 立即保存用户消息到历史
+            chatHistory.push({ role: 'user', content: message });
+            const aiMessageIndex = chatHistory.length;
+            chatHistory.push({ role: 'assistant', content: '' });
+
+            // 添加AI消息占位
+            const aiMsgId = 'ai-msg-' + Date.now();
+            addMessagePlaceholder(aiMsgId);
+
+            // 获取编辑器中的代码
+            const editorCode = editor ? editor.getValue() : '';
+            let fullResponse = '';
+            let extractedCode = null;
+            let lastCodeResult = null;  // 存储后端返回的代码处理结果
+            let wasStopped = false;
+            let sseBuffer = '';  // SSE数据缓冲区，处理跨chunk的数据
+
+            try {
+                currentAbortController = new AbortController();
+                
+                const response = await fetch('/api/chat/stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message: message,
+                        history: chatHistory,
+                        editor_code: editorCode  // 发送编辑器中的代码
+                    }),
+                    signal: currentAbortController.signal
+                });
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let lastDataTime = Date.now();
+                let receivedDone = false;
+
+                // 超时检测（45秒无数据则超时）
+                const timeoutChecker = setInterval(() => {
+                    const elapsed = Date.now() - lastDataTime;
+                    if (elapsed > 45000 && !receivedDone) {
+                        console.warn('SSE读取超时');
+                        updateMessageContent(aiMsgId, fullResponse + '\n\n⚠️ *响应超时，请点击"停止生成"后重试*');
+                        reader.cancel();
+                        clearInterval(timeoutChecker);
+                    } else if (elapsed > 20000 && !receivedDone) {
+                        showStuckButton(aiMsgId);
+                    }
+                }, 5000);
+
+                try {
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        
+                        lastDataTime = Date.now();
+                        const chunk = decoder.decode(value, { stream: true });
+                        
+                        // 处理可能跨chunk的数据
+                        sseBuffer += chunk;
+                        const messages = sseBuffer.split('\n\n');
+                        sseBuffer = messages.pop() || '';  // 保留不完整的最后一条
+                        
+                        for (const message of messages) {
+                            const lines = message.split('\n');
+                            for (const line of lines) {
+                                if (line.startsWith('data: ')) {
+                                    try {
+                                        const jsonStr = line.slice(6);
+                                        if (!jsonStr.trim()) continue;
+                                        const data = JSON.parse(jsonStr);
+                                        if (data.error) {
+                                            updateMessageContent(aiMsgId, fullResponse + `\n\n❌ 错误: ${data.error}`);
+                                        }
+                                        if (data.stopped) {
+                                            wasStopped = true;
+                                            updateMessageContent(aiMsgId, fullResponse + '\n\n⚠️ *生成已停止*');
+                                            break;
+                                        }
+                                        if (data.heartbeat) {
+                                            continue;
+                                        }
+                                        if (data.content) {
+                                            fullResponse += data.content;
+                                            updateMessageContent(aiMsgId, fullResponse);
+                                            
+                                            // 实时更新聊天历史中的AI消息
+                                            if (chatHistory[aiMessageIndex]) {
+                                                chatHistory[aiMessageIndex].content = fullResponse;
+                                            }
+                                        }
+                                        if (data.done) {
+                                            receivedDone = true;
+                                            extractedCode = data.extracted_code;
+                                            lastCodeResult = data.code_result;
+                                            break;
+                                        }
+                                    } catch (e) {
+                                        // JSON解析失败，可能是数据不完整，跳过
+                                        console.warn('SSE数据解析跳过:', e.message);
+                                    }
+                                }
+                            }
+                            if (wasStopped || receivedDone) break;
+                        }
+                        
+                        if (wasStopped || receivedDone) break;
+                    }
+                } finally {
+                    clearInterval(timeoutChecker);
+                }
+                
+                // 确保最终内容已更新到历史记录
+                if (chatHistory[aiMessageIndex]) {
+                    chatHistory[aiMessageIndex].content = fullResponse;
+                }
+
+                // 处理代码结果
+                let codeResult = null;
+                
+                // 优先使用后端返回的 code_result
+                if (lastCodeResult) {
+                    codeResult = lastCodeResult;
+                }
+                
+                // 如果后端没有提取到代码，尝试前端提取（兼容旧版）
+                if (!codeResult && !extractedCode && fullResponse && !wasStopped) {
+                    extractedCode = extractCodeFromText(fullResponse);
+                    if (extractedCode) {
+                        codeResult = { type: 'full_code', code: extractedCode };
+                    }
+                }
+                
+                // 如果只有 extractedCode，包装为 codeResult
+                if (!codeResult && extractedCode) {
+                    codeResult = { type: 'full_code', code: extractedCode };
+                }
+
+                // 如果有代码结果，处理应用
+                if (codeResult && codeResult.code) {
+                    try {
+                        const originalCode = editorCode;
+                        
+                        if (codeResult.type === 'search_replace') {
+                            // 精确编辑模式：显示 diff 预览
+                            
+                            // 显示修改摘要
+                            const appliedCount = codeResult.apply_result?.applied?.length || 0;
+                            const failedCount = codeResult.apply_result?.failed?.length || 0;
+                            
+                            // 使用简化消息函数（会添加操作按钮）
+                            simplifyMessageForSearchReplace(aiMsgId, fullResponse, appliedCount, failedCount);
+                            
+                            // 保存原始代码用于 diff 对比
+                            previousStrategy = originalCode;
+                            
+                            // 应用修改后的代码
+                            setEditorCodeWithDiff(codeResult.code, originalCode);
+                            
+                            showToast(`已应用 ${appliedCount} 处精确修改`);
+                        } else {
+                            // 完整代码模式：直接替换
+                            setEditorCode(codeResult.code);
+                            simplifyMessageWithCode(aiMsgId, fullResponse);
+                            showToast('策略代码已更新并保存');
+                        }
+                        
+                        // 如果开启自动回测，则运行回测
+                        if (autoSettings.backtest) {
+                            setTimeout(() => runBacktest(), 500);
+                        }
+                    } catch (codeError) {
+                        console.error('处理代码结果时出错:', codeError);
+                        showToast('代码处理出错', 'warning');
+                    }
+                }
+
+            } catch (error) {
+                if (error.name === 'AbortError') {
+                    updateMessageContent(aiMsgId, fullResponse + '\n\n⚠️ *生成已停止*');
+                } else {
+                    console.error('发送消息错误:', error);
+                    updateMessageContent(aiMsgId, `❌ 请求失败: ${error.message}`);
+                }
+            } finally {
+                currentAbortController = null;
+                setWaitingState(false);
+                
+                // 统一保存：只保存工作区（包含聊天记录和代码）
+                autoSaveWorkspace();
+            }
+        }
+
+        // 显示"卡住了"按钮
+        let stuckButtonShown = false;
+        function showStuckButton(msgId) {
+            if (stuckButtonShown) return;
+            stuckButtonShown = true;
+            
+            const msg = document.getElementById(msgId);
+            if (msg) {
+                const existingBtn = msg.querySelector('.stuck-btn');
+                if (!existingBtn) {
+                    const btn = document.createElement('button');
+                    btn.className = 'btn btn-warning btn-sm stuck-btn';
+                    btn.style.cssText = 'position: absolute; right: 16px; top: 16px; z-index: 10;';
+                    btn.innerHTML = '卡住了';
+                    btn.onclick = () => {
+                        stopGeneration();
+                        btn.remove();
+                    };
+                    msg.style.position = 'relative';
+                    msg.appendChild(btn);
+                }
+            }
+        }
+
+        async function stopGeneration() {
+            stuckButtonShown = false;  // 重置状态
+            isWaitingResponse = false;
+            if (currentAbortController) {
+                currentAbortController.abort();
+                currentAbortController = null;
+            }
+            setWaitingState(false);
+            fetch('/api/chat/stop', { method: 'POST' }).catch(() => {});
+            showToast('已停止生成');
+        }
+
+        // ==================== 智能滚动（参考ChatGPT） ====================
+        let userScrolledUp = false;  // 用户是否向上滚动了
+        
+        function initChatScroll() {
+            const container = document.getElementById('chatMessages');
+            container.addEventListener('scroll', () => {
+                // 检查用户是否在底部（允许50px误差）
+                const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 50;
+                userScrolledUp = !isAtBottom;
+                
+                // 显示/隐藏滚动到底部按钮
+                const scrollBtn = document.getElementById('scrollToBottomBtn');
+                if (scrollBtn) {
+                    scrollBtn.style.display = userScrolledUp ? 'flex' : 'none';
+                }
+            });
+        }
+        
+        function smartScroll() {
+            // 只有当用户在底部时才自动滚动
+            if (!userScrolledUp) {
+                const container = document.getElementById('chatMessages');
+                container.scrollTop = container.scrollHeight;
+            }
+        }
+        
+        function scrollToBottom() {
+            const container = document.getElementById('chatMessages');
+            container.scrollTop = container.scrollHeight;
+            userScrolledUp = false;
+            const scrollBtn = document.getElementById('scrollToBottomBtn');
+            if (scrollBtn) scrollBtn.style.display = 'none';
+        }
+
+        function addMessage(role, content) {
+            const container = document.getElementById('chatMessages');
+            const div = document.createElement('div');
+            div.className = `message message-${role}`;
+            div.innerHTML = `<div class="message-content">${role === 'ai' ? marked.parse(content) : escapeHtml(content)}</div>`;
+            container.appendChild(div);
+            smartScroll();
+        }
+
+        function addMessagePlaceholder(id) {
+            const container = document.getElementById('chatMessages');
+            const div = document.createElement('div');
+            div.className = 'message message-ai';
+            div.id = id;
+            div.innerHTML = `<div class="message-content"><div class="typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div></div>`;
+            container.appendChild(div);
+            userScrolledUp = false;  // 新消息时重置
+            smartScroll();
+        }
+
+        function updateMessageContent(id, content) {
+            const msg = document.getElementById(id);
+            if (msg) {
+                msg.querySelector('.message-content').innerHTML = marked.parse(content);
+                smartScroll();
+            }
+        }
+
+        function addCodeActions(id, code) {
+            const msg = document.getElementById(id);
+            if (msg) {
+                const actions = document.createElement('div');
+                actions.className = 'message-actions';
+                actions.innerHTML = `
+                    <button class="message-action-btn" onclick="applyCode(\`${escapeForJs(code)}\`)">✅ 应用代码</button>
+                    <button class="message-action-btn" onclick="copyToClipboard(\`${escapeForJs(code)}\`)">📋 复制代码</button>
+                `;
+                msg.appendChild(actions);
+            }
+        }
+
+        // 简化包含代码的消息，移除代码块，添加成功提示和操作按钮
+        function simplifyMessageWithCode(id, fullResponse) {
+            const msg = document.getElementById(id);
+            if (!msg) return;
+            
+            // 移除代码块，保留其他文字说明
+            let cleanedResponse = fullResponse
+                .replace(/```python[\s\S]*?```/g, '')
+                .replace(/```py[\s\S]*?```/g, '')
+                .replace(/```[\s\S]*?```/g, '')
+                .trim();
+            
+            // 如果移除代码后内容太少，使用默认说明
+            if (cleanedResponse.length < 20) {
+                cleanedResponse = '策略代码已生成完成。';
+            }
+            
+            // 添加成功提示
+            const successBadge = `
+                <div style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; margin-bottom: 12px; color: #10b981; font-size: 13px;">
+                    <span>✅</span>
+                    <span>策略代码已生成完成！</span>
+                </div>
+            `;
+            
+            // 始终显示操作按钮（不管是否开启自动回测）
+            const actionButtons = getCodeActionButtons();
+            
+            // 更新消息内容
+            const contentDiv = msg.querySelector('.message-content');
+            if (contentDiv) {
+                contentDiv.innerHTML = successBadge + marked.parse(cleanedResponse) + actionButtons;
+            }
+        }
+
+        // 精确编辑模式的消息简化函数
+        function simplifyMessageForSearchReplace(id, fullResponse, appliedCount, failedCount) {
+            const msg = document.getElementById(id);
+            if (!msg) return;
+            
+            // 移除 SEARCH/REPLACE 块，保留其他文字说明
+            let cleanedResponse = fullResponse
+                .replace(/<<<<<<< SEARCH[\s\S]*?>>>>>>> REPLACE/g, '')
+                .replace(/```python[\s\S]*?```/g, '')
+                .replace(/```py[\s\S]*?```/g, '')
+                .replace(/```[\s\S]*?```/g, '')
+                .trim();
+            
+            // 如果移除后内容太少，使用默认说明
+            if (cleanedResponse.length < 20) {
+                cleanedResponse = '代码修改已完成。';
+            }
+            
+            // 添加精确编辑成功提示
+            let statusText = `精确编辑完成：成功应用 ${appliedCount} 处修改`;
+            let badgeClass = '';
+            if (failedCount > 0) {
+                statusText += `，${failedCount} 处未匹配`;
+                badgeClass = 'warning';
+            }
+            
+            const successBadge = `
+                <div class="edit-status-badge ${badgeClass}">
+                    <span class="icon">${failedCount > 0 ? '⚠️' : '✅'}</span>
+                    <span>${statusText}</span>
+                </div>
+            `;
+            
+            // 操作按钮
+            const actionButtons = getCodeActionButtons();
+            
+            // 更新消息内容
+            const contentDiv = msg.querySelector('.message-content');
+            if (contentDiv) {
+                contentDiv.innerHTML = successBadge + marked.parse(cleanedResponse) + actionButtons;
+            }
+        }
+
+        // 获取代码操作按钮（复用）
+        function getCodeActionButtons() {
+            return `
+                <div class="ai-action-buttons" style="margin-top: 16px; display: flex; gap: 10px; flex-wrap: wrap;">
+                    <button class="ai-action-btn primary" onclick="runBacktest()">
+                        <span>▶</span> 运行回测
+                    </button>
+                    <button class="ai-action-btn" onclick="askIterateStrategy()">
+                        <span>🔄</span> 迭代优化
+                    </button>
+                    <button class="ai-action-btn" onclick="saveCurrentStrategy()">
+                        <span>💾</span> 保存策略
+                    </button>
+                </div>
+            `;
+        }
+
+        function applyCode(code) { setEditorCode(code); showToast('代码已应用'); }
+        function copyToClipboard(text) { navigator.clipboard.writeText(text).then(() => showToast('已复制')); }
+        function clearChat() {
+            if (confirm('确定清空聊天记录？')) {
+                const chatMessages = document.getElementById('chatMessages');
+                const welcomeMessage = document.getElementById('welcomeMessage');
+                
+                // 先保存 welcomeMessage（如果存在）
+                if (welcomeMessage) {
+                    welcomeMessage.remove();
+                }
+                
+                // 清空聊天消息
+                chatMessages.innerHTML = '';
+                
+                // 重新创建欢迎消息
+                const newWelcome = document.createElement('div');
+                newWelcome.className = 'welcome-message';
+                newWelcome.id = 'welcomeMessage';
+                newWelcome.innerHTML = `
+                    <div class="welcome-icon">🤖</div>
+                    <h2 class="welcome-title">欢迎使用 SSQuant AI Agent</h2>
+                    <p class="welcome-subtitle">输入你的需求，我可以帮你：</p>
+                    <div class="welcome-features">
+                        <div class="welcome-feature"><span class="welcome-feature-icon">📝</span><span>生成量化交易策略代码</span></div>
+                        <div class="welcome-feature"><span class="welcome-feature-icon">📊</span><span>自动回测并分析结果</span></div>
+                        <div class="welcome-feature"><span class="welcome-feature-icon">🔧</span><span>调试和优化策略</span></div>
+                        <div class="welcome-feature"><span class="welcome-feature-icon">💡</span><span>解答量化交易问题</span></div>
+                    </div>
+                `;
+                chatMessages.appendChild(newWelcome);
+                
+                // 清空历史
+                chatHistory = [];
+                showToast('聊天记录已清空');
+                
+                // 同步到当前工作区
+                autoSaveWorkspace();
+            }
+        }
+
+        // ==================== 工作区管理 ====================
+        
+        function toggleWorkspaceSidebar() {
+            const sidebar = document.getElementById('workspaceSidebar');
+            const overlay = document.getElementById('sidebarOverlay');
+            const isOpen = sidebar.classList.contains('open');
+            
+            if (isOpen) {
+                sidebar.classList.remove('open');
+                overlay.classList.remove('open');
+            } else {
+                sidebar.classList.add('open');
+                overlay.classList.add('open');
+                loadWorkspaceList();
+            }
+        }
+        
+        async function loadWorkspaceList() {
+            try {
+                const res = await fetch('/api/workspaces');
+                const data = await res.json();
+                
+                if (data.success) {
+                    workspaceList = data.workspaces;
+                    renderWorkspaceList();
+                }
+            } catch (e) {
+                console.error('加载工作区列表失败:', e);
+            }
+        }
+        
+        function renderWorkspaceList() {
+            const container = document.getElementById('workspaceList');
+            
+            if (workspaceList.length === 0) {
+                container.innerHTML = `
+                    <div class="no-data">
+                        <p>暂无工作区</p>
+                        <p style="font-size: 12px; color: var(--text-muted);">点击上方按钮创建新工作区</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            container.innerHTML = workspaceList.map(ws => {
+                const isActive = ws.id === currentWorkspaceId;
+                const date = ws.updated_at ? new Date(ws.updated_at).toLocaleString('zh-CN') : '';
+                return `
+                    <div class="workspace-item ${isActive ? 'active' : ''}" 
+                         onclick="switchWorkspace('${ws.id}')" data-id="${ws.id}">
+                        <div class="workspace-item-header">
+                            <span class="workspace-item-name">${escapeHtml(ws.name)}</span>
+                            <div class="workspace-item-actions">
+                                <button onclick="event.stopPropagation(); renameWorkspace('${ws.id}', '${escapeHtml(ws.name)}')" title="重命名">✏️</button>
+                                <button class="delete" onclick="event.stopPropagation(); deleteWorkspace('${ws.id}')" title="删除">🗑️</button>
+                            </div>
+                        </div>
+                        <div class="workspace-item-meta">
+                            ${ws.message_count} 条对话 · ${date}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        async function createNewWorkspace() {
+            const defaultName = generateWorkspaceName('新工作区');
+            const name = prompt('请输入工作区名称:', defaultName);
+            if (!name) return;
+            
+            // 如果AI正在生成，先停止
+            if (isWaitingResponse) {
+                await stopGeneration();
+            }
+            
+            // 保存当前工作区
+            if (currentWorkspaceId) {
+                await saveCurrentWorkspace();
+            }
+            
+            try {
+                
+                const res = await fetch('/api/workspace', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name })
+                });
+                const data = await res.json();
+                
+                if (data.success) {
+                    currentWorkspaceId = data.workspace.id;
+                    localStorage.setItem('lastWorkspaceId', currentWorkspaceId);
+                    document.getElementById('currentWorkspaceName').textContent = name;
+                    
+                    // 清空当前状态
+                    chatHistory = [];
+                    const chatMessages = document.getElementById('chatMessages');
+                    chatMessages.innerHTML = '';
+                    createWelcomeMessage(chatMessages);
+                    
+                    if (editor) {
+                        editor.setValue('');
+                    }
+                    currentStrategy = '';
+                    previousStrategy = '';
+                    
+                    showToast('工作区已创建: ' + name);
+                    loadWorkspaceList();
+                    toggleWorkspaceSidebar();
+                    
+                    // 刷新报告和历史列表（新工作区应该是空的）
+                    await refreshReports();
+                    await loadHistory();
+                }
+            } catch (e) {
+                showToast('创建工作区失败', 'error');
+            }
+        }
+        
+        function createWelcomeMessage(container) {
+            const welcome = document.createElement('div');
+            welcome.className = 'welcome-message';
+            welcome.id = 'welcomeMessage';
+            welcome.innerHTML = `
+                <div class="welcome-icon">🤖</div>
+                <h2 class="welcome-title">欢迎使用 SSQuant AI Agent</h2>
+                <p class="welcome-subtitle">输入你的需求，我可以帮你：</p>
+                <div class="welcome-features">
+                    <div class="welcome-feature"><span class="welcome-feature-icon">📝</span><span>生成量化交易策略代码</span></div>
+                    <div class="welcome-feature"><span class="welcome-feature-icon">📊</span><span>自动回测并分析结果</span></div>
+                    <div class="welcome-feature"><span class="welcome-feature-icon">🔧</span><span>调试和优化策略</span></div>
+                    <div class="welcome-feature"><span class="welcome-feature-icon">💡</span><span>解答量化交易问题</span></div>
+                </div>
+            `;
+            container.appendChild(welcome);
+        }
+        
+        async function switchWorkspace(workspaceId) {
+            if (workspaceId === currentWorkspaceId) {
+                toggleWorkspaceSidebar();
+                return;
+            }
+            
+            // 如果AI正在生成，先停止
+            if (isWaitingResponse) {
+                await stopGeneration();
+            }
+            
+            // 保存当前工作区
+            if (currentWorkspaceId) {
+                await saveCurrentWorkspace();
+            }
+            
+            try {
+                const res = await fetch(`/api/workspace/${workspaceId}`);
+                const data = await res.json();
+                
+                if (data.success) {
+                    const ws = data.workspace;
+                    currentWorkspaceId = ws.id;
+                    localStorage.setItem('lastWorkspaceId', currentWorkspaceId);
+                    document.getElementById('currentWorkspaceName').textContent = ws.name;
+                    
+                    // 恢复对话历史
+                    chatHistory = ws.chat_history || [];
+                    restoreChatUI(chatHistory);
+                    
+                    // 恢复代码
+                    if (editor) {
+                        const code = ws.editor_code || '';
+                        editor.setValue(code);
+                        currentStrategy = code;
+                    }
+                    
+                    showToast('已切换到: ' + ws.name);
+                    renderWorkspaceList();
+                    toggleWorkspaceSidebar();
+                    
+                    // 刷新报告和历史列表
+                    refreshReports();
+                    loadHistory();
+                }
+            } catch (e) {
+                showToast('切换工作区失败', 'error');
+            }
+        }
+        
+        function restoreChatUI(history) {
+            const chatMessages = document.getElementById('chatMessages');
+            chatMessages.innerHTML = '';
+            
+            if (history.length === 0) {
+                createWelcomeMessage(chatMessages);
+                return;
+            }
+            
+            history.forEach(msg => {
+                const div = document.createElement('div');
+                div.className = `message ${msg.role === 'user' ? 'user-message' : 'ai-message'}`;
+                
+                if (msg.role === 'user') {
+                    div.innerHTML = `<div class="message-content">${escapeHtml(msg.content)}</div>`;
+                } else {
+                    div.innerHTML = `
+                        <div class="message-avatar">🤖</div>
+                        <div class="message-content">${marked.parse(msg.content)}</div>
+                    `;
+                }
+                chatMessages.appendChild(div);
+            });
+            
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+        
+        async function saveCurrentWorkspace() {
+            if (!currentWorkspaceId) return;
+            
+            // 保存当前工作区ID到localStorage
+            localStorage.setItem('lastWorkspaceId', currentWorkspaceId);
+            
+            const editorCode = editor ? editor.getValue() : '';
+            
+            try {
+                await fetch(`/api/workspace/${currentWorkspaceId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chat_history: chatHistory,
+                        editor_code: editorCode
+                    })
+                });
+            } catch (e) {
+                console.error('保存工作区失败:', e);
+            }
+        }
+        
+        let lastWorkspaceSaveTime = 0;
+        function autoSaveWorkspace() {
+            if (!currentWorkspaceId) return;
+            
+            // 节流：至少间隔3秒才保存一次
+            const now = Date.now();
+            const minInterval = 3000;
+            
+            if (workspaceSaveTimer) {
+                clearTimeout(workspaceSaveTimer);
+            }
+            
+            const timeSinceLastSave = now - lastWorkspaceSaveTime;
+            const delay = timeSinceLastSave < minInterval ? minInterval : 1000;
+            
+            workspaceSaveTimer = setTimeout(() => {
+                lastWorkspaceSaveTime = Date.now();
+                saveCurrentWorkspace();
+            }, delay);
+        }
+        
+        async function renameWorkspace(workspaceId, currentName) {
+            const newName = prompt('请输入新名称:', currentName);
+            if (!newName || newName === currentName) return;
+            
+            try {
+                await fetch(`/api/workspace/${workspaceId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: newName })
+                });
+                
+                if (workspaceId === currentWorkspaceId) {
+                    document.getElementById('currentWorkspaceName').textContent = newName;
+                }
+                
+                loadWorkspaceList();
+                showToast('已重命名');
+            } catch (e) {
+                showToast('重命名失败', 'error');
+            }
+        }
+        
+        async function deleteWorkspace(workspaceId) {
+            if (!confirm('确定删除此工作区？此操作不可恢复。')) return;
+            
+            try {
+                await fetch(`/api/workspace/${workspaceId}`, { method: 'DELETE' });
+                
+                if (workspaceId === currentWorkspaceId) {
+                    currentWorkspaceId = null;
+                    localStorage.removeItem('lastWorkspaceId');
+                    document.getElementById('currentWorkspaceName').textContent = '全部数据';
+                    chatHistory = [];
+                    const chatMessages = document.getElementById('chatMessages');
+                    chatMessages.innerHTML = '';
+                    createWelcomeMessage(chatMessages);
+                    if (editor) editor.setValue('');
+                    // 刷新报告和历史（显示所有数据）
+                    refreshReports();
+                    loadHistory();
+                }
+                
+                loadWorkspaceList();
+                showToast('工作区已删除');
+            } catch (e) {
+                showToast('删除失败', 'error');
+            }
+        }
+        
+        let workspaceInitialized = false;  // 防止重复初始化
+        
+        async function loadLastWorkspace() {
+            // 防止重复执行
+            if (workspaceInitialized) return;
+            workspaceInitialized = true;
+            
+            // 从localStorage获取上次的工作区ID
+            const lastWorkspaceId = localStorage.getItem('lastWorkspaceId');
+            
+            // 检查是否是有效的工作区ID（不是 null、undefined、空字符串或字符串 "undefined"）
+            if (lastWorkspaceId && lastWorkspaceId !== 'undefined' && lastWorkspaceId !== 'null') {
+                try {
+                    const res = await fetch(`/api/workspace/${lastWorkspaceId}`);
+                    const data = await res.json();
+                    
+                    if (data.success) {
+                        const ws = data.workspace;
+                        currentWorkspaceId = ws.id;
+                        document.getElementById('currentWorkspaceName').textContent = ws.name;
+                        
+                        // 恢复对话历史
+                        if (ws.chat_history && ws.chat_history.length > 0) {
+                            chatHistory = ws.chat_history;
+                            restoreChatUI(chatHistory);
+                        }
+                        
+                        // 恢复代码
+                        if (editor && ws.editor_code) {
+                            editor.setValue(ws.editor_code);
+                            currentStrategy = ws.editor_code;
+                        }
+                        return;  // 成功加载，直接返回
+                    } else {
+                        // 工作区不存在，清除记录
+                        localStorage.removeItem('lastWorkspaceId');
+                    }
+                } catch (e) {
+                    // 加载失败，清除记录
+                    localStorage.removeItem('lastWorkspaceId');
+                }
+            } else {
+                // 清除无效的值
+                localStorage.removeItem('lastWorkspaceId');
+            }
+            
+            // 没有上次的工作区或加载失败，自动创建默认工作区
+            await createDefaultWorkspace();
+        }
+        
+        // 生成带时间戳的工作区名称
+        function generateWorkspaceName(prefix = '工作区') {
+            const now = new Date();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            return `${prefix}_${month}${day}_${hours}${minutes}`;
+        }
+        
+        async function createDefaultWorkspace() {
+            try {
+                const name = generateWorkspaceName('工作区');
+                const response = await fetch('/api/workspace', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: name })
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    currentWorkspaceId = data.workspace_id;
+                    localStorage.setItem('lastWorkspaceId', currentWorkspaceId);
+                    document.getElementById('currentWorkspaceName').textContent = name;
+                    loadWorkspaceList();
+                }
+            } catch (e) {
+                // 创建失败，保持"全部数据"模式
+                console.error('创建默认工作区失败:', e);
+            }
+        }
+
+        function setWaitingState(waiting) {
+            isWaitingResponse = waiting;
+            const sendBtn = document.getElementById('sendBtn');
+            const stopBtnContainer = document.getElementById('stopBtnContainer');
+            const statusDot = document.getElementById('statusDot');
+            const statusText = document.getElementById('statusText');
+
+            if (waiting) {
+                sendBtn.disabled = true;
+                sendBtn.innerHTML = '<span class="loading-spinner"></span>';
+                stopBtnContainer.style.display = 'flex';
+                statusDot.className = 'status-dot running';
+                statusText.textContent = 'AI思考中...';
+            } else {
+                sendBtn.disabled = false;
+                sendBtn.innerHTML = '➤';
+                stopBtnContainer.style.display = 'none';
+                statusDot.className = 'status-dot';
+                statusText.textContent = '就绪';
+            }
+        }
+
+        // ==================== 回测 ====================
+        async function runBacktest() {
+            // 优先使用 currentStrategy（确保 diff 模式下也能获取最新代码）
+            let code = currentStrategy;
+            if (!code && editor) {
+                code = editor.getValue();
+            }
+            // 同步到编辑器（确保显示一致）
+            if (editor && code && editor.getValue() !== code) {
+                editor.setValue(code);
+            }
+            
+            if (!code || code.includes('# 策略代码将在这里显示')) {
+                showToast('请先生成策略代码', 'error');
+                return;
+            }
+
+            const params = getBacktestParams();
+            switchRightTab('params');
+            clearLog();
+            addLog('启动回测...', 'info');
+
+            document.getElementById('statusDot').className = 'status-dot running';
+            document.getElementById('statusText').textContent = '回测中...';
+
+            try {
+                const response = await fetch('/api/backtest/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code, params, workspace_id: currentWorkspaceId || '' })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    listenBacktestStatus();
+                } else {
+                    addLog(`错误: ${data.error}`, 'error');
+                    resetStatus();
+                    // 如果开启自动调试，让AI分析错误；否则显示修复按钮
+                    if (autoSettings.debug && data.error) {
+                        setTimeout(() => autoDebugErrors([data.error]), 500);
+                    } else if (data.error) {
+                        showErrorWithFixButton([data.error]);
+                    }
+                }
+            } catch (error) {
+                addLog(`请求失败: ${error.message}`, 'error');
+                resetStatus();
+                // 如果开启自动调试，让AI分析错误；否则显示修复按钮
+                if (autoSettings.debug) {
+                    setTimeout(() => autoDebugErrors([error.message]), 500);
+                } else {
+                    showErrorWithFixButton([error.message]);
+                }
+            }
+        }
+
+        function getBacktestParams() {
+            let params;
+            if (currentStrategyMode === 'single') {
+                params = {
+                    strategy_mode: 'single',
+                    symbol: document.getElementById('paramSymbol').value,
+                    kline_period: document.getElementById('paramPeriod').value,
+                    start_date: document.getElementById('paramStartDate').value,
+                    end_date: document.getElementById('paramEndDate').value,
+                    initial_capital: parseInt(document.getElementById('paramCapital').value),
+                    commission: parseFloat(document.getElementById('paramCommission').value),
+                    margin_rate: parseFloat(document.getElementById('paramMargin').value),
+                    contract_multiplier: parseInt(document.getElementById('paramMultiplier').value),
+                    price_tick: parseFloat(document.getElementById('paramPriceTick').value),
+                    slippage_ticks: parseInt(document.getElementById('paramSlippage').value),
+                    adjust_type: document.getElementById('paramAdjust').value,
+                    lookback_bars: parseInt(document.getElementById('paramLookback').value),
+                };
+            } else if (currentStrategyMode === 'tick') {
+                params = {
+                    strategy_mode: 'tick',
+                    symbol: document.getElementById('paramTickSymbol').value,
+                    kline_period: 'tick',
+                    start_date: document.getElementById('paramTickStartDate').value,
+                    end_date: document.getElementById('paramTickEndDate').value,
+                    price_tick: parseFloat(document.getElementById('paramTickPriceTick').value),
+                    contract_multiplier: parseInt(document.getElementById('paramTickMultiplier').value),
+                    slippage_ticks: parseInt(document.getElementById('paramTickSlippage').value),
+                    lookback_bars: parseInt(document.getElementById('paramTickLookback').value),
+                };
+            } else {
+                params = {
+                    strategy_mode: 'multi',
+                    start_date: document.getElementById('paramMultiStartDate').value,
+                    end_date: document.getElementById('paramMultiEndDate').value,
+                    initial_capital: parseInt(document.getElementById('paramMultiCapital').value),
+                    commission: parseFloat(document.getElementById('paramMultiCommission').value),
+                    margin_rate: parseFloat(document.getElementById('paramMultiMargin').value),
+                    lookback_bars: parseInt(document.getElementById('paramMultiLookback').value),
+                    align_data: document.getElementById('paramAlignData').value === 'true',
+                    data_sources: getDataSources(),
+                };
+            }
+            
+            // 保存回测参数到本地
+            saveBacktestParams(params);
+            return params;
+        }
+        
+        // 保存回测参数（防抖）
+        let saveParamsTimer = null;
+        function saveBacktestParams(params) {
+            if (saveParamsTimer) clearTimeout(saveParamsTimer);
+            saveParamsTimer = setTimeout(async () => {
+                try {
+                    await fetch('/api/settings', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ backtest_params: params })
+                    });
+                    console.log('回测参数已保存');
+                } catch (e) { console.error('保存回测参数失败:', e); }
+            }, 500);
+        }
+
+        let backtestErrors = [];  // 收集回测错误
+        let lastReportPath = null;  // 最后一次回测报告路径
+        let backtestHasError = false;  // 是否有错误
+        let backtestWorker = null;  // Web Worker（后台不断开）
+        let isBacktestRunning = false;  // 回测是否正在运行
+
+        // 创建 Web Worker 来处理 SSE（后台不会断开）
+        function createBacktestWorker() {
+            const workerCode = `
+                let eventSource = null;
+                
+                self.onmessage = function(e) {
+                    if (e.data.action === 'start') {
+                        if (eventSource) eventSource.close();
+                        
+                        eventSource = new EventSource(e.data.url);
+                        
+                        eventSource.onmessage = function(event) {
+                            self.postMessage({ type: 'message', data: event.data });
+                        };
+                        
+                        eventSource.onerror = function() {
+                            self.postMessage({ type: 'error' });
+                            eventSource.close();
+                            eventSource = null;
+                        };
+                    } else if (e.data.action === 'stop') {
+                        if (eventSource) {
+                            eventSource.close();
+                            eventSource = null;
+                        }
+                    }
+                };
+            `;
+            
+            const blob = new Blob([workerCode], { type: 'application/javascript' });
+            return new Worker(URL.createObjectURL(blob));
+        }
+
+        function listenBacktestStatus() {
+            // 关闭已有 Worker
+            if (backtestWorker) {
+                backtestWorker.postMessage({ action: 'stop' });
+                backtestWorker.terminate();
+                backtestWorker = null;
+            }
+            
+            backtestErrors = [];
+            lastReportPath = null;
+            backtestHasError = false;
+            isBacktestRunning = true;
+            
+            // 创建新的 Worker
+            backtestWorker = createBacktestWorker();
+            
+            backtestWorker.onmessage = function(e) {
+                if (e.data.type === 'message') {
+                    const data = JSON.parse(e.data.data);
+                    handleBacktestMessage(data);
+                } else if (e.data.type === 'error') {
+                    // Worker 中的 SSE 出错，回退到主线程 SSE
+                    if (isBacktestRunning) {
+                        fallbackToMainThreadSSE();
+                    }
+                }
+            };
+            
+            // 启动 Worker 中的 SSE
+            backtestWorker.postMessage({ 
+                action: 'start', 
+                url: window.location.origin + '/api/backtest/status' 
+            });
+        }
+        
+        // 处理回测消息
+        function handleBacktestMessage(data) {
+            if (data.type === 'done') { 
+                if (backtestWorker) {
+                    backtestWorker.postMessage({ action: 'stop' });
+                    backtestWorker.terminate();
+                    backtestWorker = null;
+                }
+                isBacktestRunning = false;
+                resetStatus(); 
+                refreshReports(); 
+                
+                if (backtestErrors.length > 0 || backtestHasError) {
+                    const uniqueErrors = [...new Set(backtestErrors)];
+                    if (autoSettings.debug) {
+                        setTimeout(() => autoDebugErrors(uniqueErrors), 500);
+                    } else {
+                        showErrorWithFixButton(uniqueErrors);
+                    }
+                } else if (lastReportPath) {
+                    if (autoSettings.debug) {
+                        setTimeout(() => analyzeReport(lastReportPath), 1000);
+                    } else {
+                        showBacktestSuccessButtons(lastReportPath);
+                    }
+                }
+                return; 
+            }
+            if (data.type === 'heartbeat') return;
+            if (data.type === 'report') {
+                lastReportPath = data.path;
+                refreshReports();
+                switchRightTab('report');
+            }
+            if (data.type === 'error') {
+                backtestHasError = true;
+                if (!backtestErrors.includes(data.message)) {
+                    backtestErrors.push(data.message);
+                }
+            }
+            addLog(data.message, data.type);
+        }
+        
+        // 回退到主线程 SSE（如果 Worker 不支持）
+        function fallbackToMainThreadSSE() {
+            const eventSource = new EventSource('/api/backtest/status');
+            
+            eventSource.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                if (data.type === 'done') {
+                    eventSource.close();
+                }
+                handleBacktestMessage(data);
+            };
+            
+            eventSource.onerror = function() {
+                eventSource.close();
+                resetStatus();
+            };
+        }
+
+        // 自动调试：让AI分析错误并修复
+        async function autoDebugErrors(errors) {
+            const errorMsg = errors.join('\n');
+            
+            // 构建调试请求
+            const debugPrompt = `回测运行出错，请分析以下错误并修复代码：
+
+【错误信息】
+${errorMsg}
+
+请分析错误原因，使用 SEARCH/REPLACE 格式精确修复出错的代码部分。`;
+            
+            // 自动发送到AI
+            document.getElementById('chatInput').value = debugPrompt;
+            showToast('自动调试：正在分析错误...');
+            await sendMessage();
+        }
+
+        // 存储最后一次错误信息（用于修复按钮）
+        let lastBacktestError = '';
+
+        // 显示错误并提供修复按钮（非自动模式）
+        function showErrorWithFixButton(errors) {
+            const errorMsg = errors.join('\n');
+            lastBacktestError = errorMsg;  // 保存错误信息
+            
+            // 在聊天中添加错误提示和修复按钮
+            const errorId = 'error-msg-' + Date.now();
+            const container = document.getElementById('chatMessages');
+            const div = document.createElement('div');
+            div.className = 'message message-assistant';
+            div.id = errorId;
+            div.innerHTML = `
+                <div class="message-avatar">🤖</div>
+                <div class="message-bubble">
+                    <div class="message-content">
+                        <div style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; margin-bottom: 12px; color: #ef4444; font-size: 13px;">
+                            <span>❌</span>
+                            <span>回测运行出错</span>
+                        </div>
+                        <pre style="background: var(--bg-primary); padding: 12px; border-radius: 6px; font-size: 12px; overflow-x: auto; white-space: pre-wrap; word-break: break-all;">${escapeHtml(errorMsg)}</pre>
+                        <div class="ai-action-buttons" style="margin-top: 16px; display: flex; gap: 10px; flex-wrap: wrap;">
+                            <button class="ai-action-btn danger" onclick="askFixErrors()">
+                                <span>🔧</span> 让AI修复
+                            </button>
+                            <button class="ai-action-btn" onclick="runBacktest()">
+                                <span>🔄</span> 重新回测
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            container.appendChild(div);
+            smartScroll();
+        }
+
+        // 请求AI修复错误
+        async function askFixErrors() {
+            if (!lastBacktestError) {
+                showToast('没有错误信息', 'error');
+                return;
+            }
+            
+            const debugPrompt = `回测运行出错，请分析以下错误并修复代码：
+
+【错误信息】
+${lastBacktestError}
+
+请分析错误原因，使用 SEARCH/REPLACE 格式精确修复出错的代码部分。`;
+            
+            document.getElementById('chatInput').value = debugPrompt;
+            await sendMessage();
+        }
+
+        // 请求AI迭代优化策略
+        async function askIterateStrategy() {
+            const iteratePrompt = `请分析当前策略代码，给出优化建议并修改代码。
+
+可以从以下方面考虑优化：
+1. 添加止损止盈逻辑
+2. 优化入场条件
+3. 添加过滤器减少假信号
+4. 改进资金管理
+
+请使用 SEARCH/REPLACE 格式精确修改需要改动的部分，不要重写整个代码。`;
+            
+            document.getElementById('chatInput').value = iteratePrompt;
+            await sendMessage();
+        }
+
+        // 保存当前策略到历史
+        async function saveCurrentStrategy() {
+            // 如果在diff模式，使用 currentStrategy；否则使用编辑器内容
+            let code = '';
+            if (isInDiffMode && currentStrategy) {
+                code = currentStrategy;
+            } else if (editor) {
+                code = editor.getValue();
+            }
+            
+            if (!code || code.length < 50) {
+                showToast('没有可保存的策略代码', 'error');
+                return;
+            }
+            
+            // 保存到历史版本
+            await saveToHistory(code, false);
+            
+            // 同时保存工作区
+            if (currentWorkspaceId) {
+                await saveCurrentWorkspace();
+            }
+            
+            loadHistory();  // 刷新历史列表
+        }
+
+        // 显示回测成功后的操作按钮
+        function showBacktestSuccessButtons(reportPath) {
+            const filename = reportPath.split(/[\/\\]/).pop();
+            
+            const container = document.getElementById('chatMessages');
+            const div = document.createElement('div');
+            div.className = 'message message-assistant';
+            div.innerHTML = `
+                <div class="message-avatar">🤖</div>
+                <div class="message-bubble">
+                    <div class="message-content">
+                        <div style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; margin-bottom: 12px; color: #10b981; font-size: 13px;">
+                            <span>✅</span>
+                            <span>回测完成！</span>
+                        </div>
+                        <p style="margin-bottom: 12px; color: var(--text-secondary);">回测报告已生成，您可以：</p>
+                        <div class="ai-action-buttons" style="display: flex; gap: 10px; flex-wrap: wrap;">
+                            <button class="ai-action-btn primary" onclick="openReport('${filename}')">
+                                <span>📊</span> 查看报告
+                            </button>
+                            <button class="ai-action-btn" onclick="askAnalyzeReport('${encodeURIComponent(reportPath)}')">
+                                <span>🔍</span> AI分析报告
+                            </button>
+                            <button class="ai-action-btn" onclick="askIterateStrategy()">
+                                <span>🔄</span> 迭代优化
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            container.appendChild(div);
+            smartScroll();
+        }
+
+        // 请求AI分析报告
+        async function askAnalyzeReport(encodedPath) {
+            const reportPath = decodeURIComponent(encodedPath);
+            await analyzeReport(reportPath);
+        }
+
+        // 分析回测报告
+        async function analyzeReport(reportPath) {
+            try {
+                const filename = reportPath.split(/[\/\\]/).pop();
+                const response = await fetch(`/api/report/${filename}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    // 提取报告中的关键指标（简化版本，只取文本内容）
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(data.content, 'text/html');
+                    const textContent = doc.body ? doc.body.innerText.substring(0, 2000) : '无法解析报告';
+                    
+                    const analyzePrompt = `请分析以下回测报告，给出改进建议：
+
+【回测报告摘要】
+${textContent}
+
+请分析：
+1. 策略表现如何？
+2. 主要问题是什么？
+3. 有什么改进建议？`;
+                    
+                    document.getElementById('chatInput').value = analyzePrompt;
+                    showToast('自动分析：正在分析回测报告...');
+                    await sendMessage();
+                }
+            } catch (error) {
+                console.error('分析报告失败:', error);
+            }
+        }
+
+        function resetStatus() {
+            document.getElementById('statusDot').className = 'status-dot';
+            document.getElementById('statusText').textContent = '就绪';
+        }
+
+        // ==================== 报告列表 ====================
+        async function refreshReports() {
+            try {
+                // 添加时间戳防止缓存
+                const timestamp = Date.now();
+                let url = '/api/reports';
+                if (currentWorkspaceId) {
+                    url += `?workspace_id=${currentWorkspaceId}&_t=${timestamp}`;
+                } else {
+                    url += `?_t=${timestamp}`;
+                }
+                const response = await fetch(url);
+                const data = await response.json();
+                const container = document.getElementById('reportList');
+                const actionsDiv = document.getElementById('reportActions');
+
+                if (data.success && data.reports.length > 0) {
+                    actionsDiv.style.display = 'flex';
+                    container.innerHTML = data.reports.map(r => `
+                        <div class="report-item">
+                            <div class="report-item-content" onclick="openReport('${r.name}')">
+                                <div class="report-item-name">${r.name}</div>
+                                <div class="report-item-time">${r.modified}</div>
+                            </div>
+                            <button class="delete-btn" onclick="event.stopPropagation(); deleteReport('${r.name}')" title="删除">✕</button>
+                        </div>
+                    `).join('');
+                } else {
+                    actionsDiv.style.display = 'none';
+                    container.innerHTML = '<div class="no-data"><div class="no-data-icon">📈</div><p>暂无回测报告</p></div>';
+                }
+            } catch (error) {
+                console.error('刷新报告失败:', error);
+            }
+        }
+
+        async function openReport(filename) {
+            try {
+                const response = await fetch(`/api/report/${filename}`);
+                const data = await response.json();
+                if (data.success) {
+                    document.getElementById('reportModalTitle').textContent = `📊 ${filename}`;
+                    document.getElementById('reportIframe').srcdoc = data.content;
+                    openModal('reportModal');
+                }
+            } catch (error) {
+                showToast('加载报告失败', 'error');
+            }
+        }
+
+        // 删除单个报告
+        async function deleteReport(filename) {
+            if (!confirm(`确定要删除报告 "${filename}" 吗？`)) return;
+            try {
+                const response = await fetch(`/api/report/${filename}`, { method: 'DELETE' });
+                const data = await response.json();
+                if (data.success) {
+                    showToast('报告已删除');
+                    refreshReports();
+                } else {
+                    showToast(data.error || '删除失败', 'error');
+                }
+            } catch (error) {
+                showToast('删除报告失败', 'error');
+            }
+        }
+
+        // 清空所有报告
+        async function clearAllReports() {
+            if (!confirm('确定要清空所有回测报告吗？此操作不可恢复！')) return;
+            try {
+                const response = await fetch('/api/reports/clear', { method: 'DELETE' });
+                const data = await response.json();
+                if (data.success) {
+                    showToast(`已清空 ${data.count} 个报告`);
+                    refreshReports();
+                } else {
+                    showToast(data.error || '清空失败', 'error');
+                }
+            } catch (error) {
+                showToast('清空报告失败', 'error');
+            }
+        }
+
+        // 删除单个历史记录
+        async function deleteHistoryItem(itemId) {
+            if (!confirm('确定要删除此历史记录吗？')) return;
+            try {
+                const response = await fetch(`/api/history/${itemId}`, { method: 'DELETE' });
+                const data = await response.json();
+                if (data.success) {
+                    showToast('历史记录已删除');
+                    loadHistory();
+                } else {
+                    showToast(data.error || '删除失败', 'error');
+                }
+            } catch (error) {
+                showToast('删除历史失败', 'error');
+            }
+        }
+
+        // 清空所有历史记录
+        async function clearAllHistory() {
+            if (!confirm('确定要清空所有历史记录吗？此操作不可恢复！')) return;
+            try {
+                const response = await fetch('/api/history/clear', { method: 'DELETE' });
+                const data = await response.json();
+                if (data.success) {
+                    showToast(`已清空 ${data.count} 条历史记录`);
+                    loadHistory();
+                } else {
+                    showToast(data.error || '清空失败', 'error');
+                }
+            } catch (error) {
+                showToast('清空历史失败', 'error');
+            }
+        }
+
+        // ==================== 右侧面板 ====================
+        function switchRightTab(tab) {
+            document.querySelectorAll('.right-tab').forEach(t => t.classList.remove('active'));
+            document.querySelector(`.right-tab[data-tab="${tab}"]`).classList.add('active');
+            document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+            document.getElementById(`tab${tab.charAt(0).toUpperCase() + tab.slice(1)}`).classList.add('active');
+            if (tab === 'history') loadHistory();
+        }
+
+        function switchStrategyMode(mode) {
+            currentStrategyMode = mode;
+            document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
+            document.querySelector(`.mode-tab[data-mode="${mode}"]`).classList.add('active');
+            document.querySelectorAll('.mode-content').forEach(c => c.classList.remove('active'));
+            document.getElementById(`mode${mode.charAt(0).toUpperCase() + mode.slice(1)}`).classList.add('active');
+            
+            // 切换到多品种模式时渲染数据源列表
+            if (mode === 'multi') {
+                renderDataSources();
+            }
+        }
+
+        // ==================== 多数据源管理 ====================
+        let dataSources = [
+            { symbol: 'rb888', kline_period: '5m', adjust_type: '1', price_tick: 1, contract_multiplier: 10, slippage_ticks: 1 },
+            { symbol: 'rb888', kline_period: '15m', adjust_type: '1', price_tick: 1, contract_multiplier: 10, slippage_ticks: 1 }
+        ];
+
+        function renderDataSources() {
+            const container = document.getElementById('dataSourcesList');
+            if (!container) return;
+            
+            container.innerHTML = dataSources.map((ds, idx) => `
+                <div class="data-source-card" data-index="${idx}">
+                    <div class="data-source-header">
+                        <span class="data-source-index">数据源 ${idx}</span>
+                        <button class="btn-remove-source" onclick="removeDataSource(${idx})" ${dataSources.length <= 1 ? 'disabled style="opacity:0.5"' : ''}>删除</button>
+                    </div>
+                    <div class="data-source-grid">
+                        <div class="data-source-item">
+                            <label>合约代码</label>
+                            <input type="text" value="${ds.symbol}" onchange="updateDataSource(${idx}, 'symbol', this.value)">
+                        </div>
+                        <div class="data-source-item">
+                            <label>K线周期</label>
+                            <select onchange="updateDataSource(${idx}, 'kline_period', this.value)">
+                                <option value="1m" ${ds.kline_period === '1m' ? 'selected' : ''}>1分钟</option>
+                                <option value="5m" ${ds.kline_period === '5m' ? 'selected' : ''}>5分钟</option>
+                                <option value="15m" ${ds.kline_period === '15m' ? 'selected' : ''}>15分钟</option>
+                                <option value="30m" ${ds.kline_period === '30m' ? 'selected' : ''}>30分钟</option>
+                                <option value="1h" ${ds.kline_period === '1h' ? 'selected' : ''}>1小时</option>
+                                <option value="1d" ${ds.kline_period === '1d' ? 'selected' : ''}>日线</option>
+                            </select>
+                        </div>
+                        <div class="data-source-item">
+                            <label>复权类型</label>
+                            <select onchange="updateDataSource(${idx}, 'adjust_type', this.value)">
+                                <option value="0" ${ds.adjust_type === '0' ? 'selected' : ''}>不复权</option>
+                                <option value="1" ${ds.adjust_type === '1' ? 'selected' : ''}>后复权</option>
+                            </select>
+                        </div>
+                        <div class="data-source-item">
+                            <label>最小变动价位</label>
+                            <input type="text" value="${ds.price_tick}" onchange="updateDataSource(${idx}, 'price_tick', parseFloat(this.value))">
+                        </div>
+                        <div class="data-source-item">
+                            <label>合约乘数</label>
+                            <input type="number" value="${ds.contract_multiplier}" onchange="updateDataSource(${idx}, 'contract_multiplier', parseInt(this.value))">
+                        </div>
+                        <div class="data-source-item">
+                            <label>滑点跳数</label>
+                            <input type="number" value="${ds.slippage_ticks}" onchange="updateDataSource(${idx}, 'slippage_ticks', parseInt(this.value))">
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function addDataSource() {
+            dataSources.push({
+                symbol: 'rb888',
+                kline_period: '5m',
+                adjust_type: '1',
+                price_tick: 1,
+                contract_multiplier: 10,
+                slippage_ticks: 1
+            });
+            renderDataSources();
+        }
+
+        function removeDataSource(idx) {
+            if (dataSources.length <= 1) return;
+            dataSources.splice(idx, 1);
+            renderDataSources();
+        }
+
+        function updateDataSource(idx, field, value) {
+            if (dataSources[idx]) {
+                dataSources[idx][field] = value;
+            }
+        }
+
+        function getDataSources() {
+            return dataSources;
+        }
+
+        async function loadHistory() {
+            try {
+                // 添加时间戳防止缓存
+                const timestamp = Date.now();
+                let url = '/api/history';
+                if (currentWorkspaceId) {
+                    url += `?workspace_id=${currentWorkspaceId}&_t=${timestamp}`;
+                } else {
+                    url += `?_t=${timestamp}`;
+                }
+                const response = await fetch(url);
+                const data = await response.json();
+                const container = document.getElementById('historyList');
+                const actionsDiv = document.getElementById('historyActions');
+
+                if (data.success && data.history.length > 0) {
+                    actionsDiv.style.display = 'flex';
+                    // 倒序显示（最新的在上面）
+                    const items = [...data.history].reverse();
+                    container.innerHTML = items.map((item, i) => {
+                        // 使用项目自身的id（如果有），否则使用计算的索引
+                        const itemId = item.id !== undefined ? item.id : (data.history.length - 1 - i);
+                        const autoTag = item.auto_saved ? '<span class="auto-save-tag">自动</span>' : '';
+                        const timeStr = formatHistoryTime(item.timestamp);
+                        const strategyName = item.name || item.strategy_file?.split(/[\/\\]/).pop() || '策略版本';
+                        return `
+                            <div class="history-item">
+                                <div class="history-item-header">
+                                    <span class="history-item-time">${timeStr}</span>
+                                    <span class="history-item-badge">v${data.history.length - i}</span>
+                                    ${autoTag}
+                                    <button class="delete-btn" onclick="deleteHistoryItem(${itemId})" title="删除">✕</button>
+                                </div>
+                                <div class="history-item-name">${strategyName}</div>
+                                <div class="history-item-actions">
+                                    <button class="message-action-btn" onclick="previewHistory(${itemId})">预览</button>
+                                    <button class="message-action-btn" onclick="loadHistoryCode(${itemId})">加载</button>
+                                    ${item.report_path ? `<button class="message-action-btn" onclick="openReport('${item.report_path.split(/[\/\\]/).pop()}')">报告</button>` : ''}
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                } else {
+                    actionsDiv.style.display = 'none';
+                    container.innerHTML = '<div class="no-data">暂无历史记录<br><small>AI生成或手动保存的策略会显示在这里</small></div>';
+                }
+            } catch (error) {
+                console.error('加载历史失败:', error);
+            }
+        }
+
+        function formatHistoryTime(timestamp) {
+            if (!timestamp) return '';
+            // timestamp格式: YYYYMMDD_HHMMSS
+            const match = timestamp.match(/(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/);
+            if (match) {
+                return `${match[2]}-${match[3]} ${match[4]}:${match[5]}`;
+            }
+            return timestamp;
+        }
+
+        async function previewHistory(index) {
+            try {
+                const response = await fetch(`/api/history/preview/${index}`);
+                const data = await response.json();
+                
+                if (data.success && data.code) {
+                    // 使用弹窗显示预览
+                    openHistoryPreviewModal(data, index);
+                } else {
+                    showToast('加载预览失败', 'error');
+                }
+            } catch (error) {
+                showToast('加载预览失败', 'error');
+            }
+        }
+
+        function openHistoryPreviewModal(data, index) {
+            // 保存预览代码
+            previewCode = data.code;
+            historyPreviewIndex = index;
+            
+            // 设置标题
+            document.getElementById('codePreviewTitle').textContent = `📝 ${data.name || '历史策略预览'}`;
+            
+            // 打开模态框
+            openModal('codePreviewModal');
+            
+            // 延迟创建/更新预览编辑器
+            setTimeout(() => {
+                if (!previewEditor) {
+                    previewEditor = monaco.editor.create(document.getElementById('codePreviewEditor'), {
+                        value: previewCode,
+                        language: 'python',
+                        theme: 'ssquant-dark',
+                        fontSize: 14,
+                        fontFamily: "'JetBrains Mono', monospace",
+                        readOnly: true,
+                        automaticLayout: true,
+                    });
+                } else {
+                    previewEditor.setValue(previewCode);
+                }
+            }, 100);
+        }
+        
+        let historyPreviewIndex = null;
+
+        async function loadHistoryCode(index) {
+            try {
+                const response = await fetch(`/api/history/${index}`);
+                const data = await response.json();
+                if (data.success && data.item.code) { 
+                    setEditorCode(data.item.code); 
+                    lastSavedCode = data.item.code; // 标记为已保存状态，避免重复保存
+                    showToast('已加载历史版本'); 
+                }
+            } catch (error) { console.error('加载历史代码失败:', error); }
+        }
+
+        // ==================== 日志 ====================
+        function addLog(message, type = 'info') {
+            const container = document.getElementById('runLog');
+            const line = document.createElement('div');
+            line.className = `log-line ${type}`;
+            line.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            container.appendChild(line);
+            container.scrollTop = container.scrollHeight;
+        }
+        function clearLog() { document.getElementById('runLog').innerHTML = ''; }
+
+        // ==================== 设置 ====================
+        function openModal(id) { document.getElementById(id).classList.add('active'); }
+        function closeModal(id) { document.getElementById(id).classList.remove('active'); }
+        function openSettingsModal() { openModal('settingsModal'); }
+
+        // 提供商预设配置
+        const providerPresets = {
+            'DeepSeek': { base_url: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
+            'OpenAI': { base_url: 'https://api.openai.com/v1', model: 'gpt-4o' },
+            'Claude': { base_url: 'https://api.anthropic.com/v1', model: 'claude-3-opus-20240229' },
+            'Qwen': { base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-max' },
+            'Moonshot': { base_url: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
+            'Zhipu': { base_url: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4' },
+            'Custom': { base_url: '', model: '' }
+        };
+
+        function onProviderChange() {
+            const provider = document.getElementById('settingProvider').value;
+            if (provider !== 'Custom' && providerPresets[provider]) {
+                const preset = providerPresets[provider];
+                document.getElementById('settingBaseUrl').value = preset.base_url;
+                document.getElementById('settingModel').value = preset.model;
+            }
+        }
+
+        async function loadSettings() {
+            try {
+                const response = await fetch('/api/settings');
+                const data = await response.json();
+                if (data.success) {
+                    // AI设置
+                    document.getElementById('settingProvider').value = data.ai_settings.provider || 'Custom';
+                    document.getElementById('settingBaseUrl').value = data.ai_settings.base_url || 'https://api.deepseek.com/v1';
+                    document.getElementById('settingModel').value = data.ai_settings.model;
+                    document.getElementById('settingApiKey').value = data.ai_settings.api_key;
+                    document.getElementById('settingTemp').value = data.ai_settings.temperature;
+                    document.getElementById('tempValue').textContent = data.ai_settings.temperature;
+                    
+                    // 自动设置
+                    autoSettings = {
+                        backtest: data.auto_settings.auto_backtest,
+                        debug: data.auto_settings.auto_debug,
+                        iterate: data.auto_settings.auto_iterate
+                    };
+                    updateAutoToggles();
+                    
+                    // 回测参数 - 单品种
+                    const bp = data.backtest_params;
+                    if (bp) {
+                        // 单品种参数
+                        setValueSafe('paramSymbol', bp.symbol);
+                        setValueSafe('paramPeriod', bp.kline_period);
+                        setValueSafe('paramStartDate', bp.start_date);
+                        setValueSafe('paramEndDate', bp.end_date);
+                        setValueSafe('paramCapital', bp.initial_capital);
+                        setValueSafe('paramCommission', bp.commission);
+                        setValueSafe('paramMargin', bp.margin_rate);
+                        setValueSafe('paramMultiplier', bp.contract_multiplier);
+                        setValueSafe('paramPriceTick', bp.price_tick);
+                        setValueSafe('paramSlippage', bp.slippage_ticks);
+                        setValueSafe('paramAdjust', bp.adjust_type);
+                        setValueSafe('paramLookback', bp.lookback_bars);
+                        
+                        // TICK参数
+                        setValueSafe('paramTickSymbol', bp.symbol);
+                        setValueSafe('paramTickStartDate', bp.start_date);
+                        setValueSafe('paramTickEndDate', bp.end_date);
+                        setValueSafe('paramTickPriceTick', bp.price_tick);
+                        setValueSafe('paramTickMultiplier', bp.contract_multiplier);
+                        setValueSafe('paramTickSlippage', bp.slippage_ticks);
+                        setValueSafe('paramTickLookback', bp.lookback_bars);
+                        
+                        // 多品种参数
+                        setValueSafe('paramMultiStartDate', bp.start_date);
+                        setValueSafe('paramMultiEndDate', bp.end_date);
+                        setValueSafe('paramMultiCapital', bp.initial_capital);
+                        setValueSafe('paramMultiCommission', bp.commission);
+                        setValueSafe('paramMultiMargin', bp.margin_rate);
+                        setValueSafe('paramMultiLookback', bp.lookback_bars);
+                        setValueSafe('paramAlignData', bp.align_data ? 'true' : 'false');
+                        
+                        // 加载数据源配置
+                        if (bp.data_sources && bp.data_sources.length > 0) {
+                            dataSources = bp.data_sources;
+                            renderDataSources();
+                        }
+                    }
+                }
+            } catch (error) { console.error('加载设置失败:', error); }
+        }
+        
+        function setValueSafe(id, value) {
+            const el = document.getElementById(id);
+            if (el && value !== undefined) el.value = value;
+        }
+
+        async function saveSettings() {
+            const settings = {
+                ai_settings: {
+                    provider: document.getElementById('settingProvider').value,
+                    base_url: document.getElementById('settingBaseUrl').value.trim(),
+                    model: document.getElementById('settingModel').value.trim(),
+                    api_key: document.getElementById('settingApiKey').value,
+                    temperature: parseFloat(document.getElementById('settingTemp').value)
+                }
+            };
+            try {
+                await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(settings)
+                });
+                showToast('设置已保存');
+                closeModal('settingsModal');
+            } catch (error) { showToast('保存失败', 'error'); }
+        }
+
+        function resetSettings() {
+            document.getElementById('settingProvider').value = 'DeepSeek';
+            document.getElementById('settingBaseUrl').value = 'https://api.deepseek.com/v1';
+            document.getElementById('settingModel').value = 'deepseek-chat';
+            document.getElementById('settingApiKey').value = '';
+            document.getElementById('settingTemp').value = '0.7';
+            document.getElementById('tempValue').textContent = '0.7';
+        }
+
+        // ==================== Auto Toggles ====================
+        function toggleAuto(type) {
+            autoSettings[type] = !autoSettings[type];
+            updateAutoToggles();
+            fetch('/api/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    auto_settings: {
+                        auto_backtest: autoSettings.backtest,
+                        auto_debug: autoSettings.debug,
+                        auto_iterate: autoSettings.iterate
+                    }
+                })
+            });
+        }
+
+        function updateAutoToggles() {
+            document.getElementById('toggleBacktest').classList.toggle('active', autoSettings.backtest);
+            document.getElementById('toggleDebug').classList.toggle('active', autoSettings.debug);
+            document.getElementById('toggleIterate').classList.toggle('active', autoSettings.iterate);
+        }
+
+        // ==================== 示例策略 ====================
+        async function openExamplesModal() {
+            openModal('examplesModal');
+            try {
+                const response = await fetch('/api/examples');
+                const data = await response.json();
+                const container = document.getElementById('examplesList');
+
+                if (data.success && data.examples.length > 0) {
+                    container.innerHTML = data.examples.map(e => `
+                        <div class="history-item">
+                            <div class="history-item-name">${e.name}</div>
+                            <div class="history-item-actions">
+                                <button class="message-action-btn" onclick="previewExample('${e.path.replace(/\\/g, '\\\\')}', '${e.name}')">预览代码</button>
+                                <button class="message-action-btn" onclick="loadExample('${e.path.replace(/\\/g, '\\\\')}')">加载策略</button>
+                            </div>
+                        </div>
+                    `).join('');
+                }
+            } catch (error) { console.error('加载示例失败:', error); }
+        }
+
+        async function previewExample(path, name) {
+            try {
+                const filename = path.split(/[\/\\]/).pop();
+                const response = await fetch(`/api/example/${filename}`);
+                const data = await response.json();
+
+                if (data.success) {
+                    previewCode = data.content;
+                    document.getElementById('codePreviewTitle').textContent = `📝 ${name}`;
+                    closeModal('examplesModal');
+                    openModal('codePreviewModal');
+
+                    // 延迟创建预览编辑器
+                    setTimeout(() => {
+                        if (!previewEditor) {
+                            previewEditor = monaco.editor.create(document.getElementById('codePreviewEditor'), {
+                                value: previewCode,
+                                language: 'python', theme: 'ssquant-dark',
+                                fontSize: 14, fontFamily: "'JetBrains Mono', monospace",
+                                readOnly: true, automaticLayout: true,
+                            });
+                        } else {
+                            previewEditor.setValue(previewCode);
+                        }
+                    }, 100);
+                }
+            } catch (error) { showToast('加载失败', 'error'); }
+        }
+
+        async function loadExample(path) {
+            try {
+                const filename = path.split(/[\/\\]/).pop();
+                const response = await fetch(`/api/example/${filename}`);
+                const data = await response.json();
+                if (data.success) {
+                    setEditorCode(data.content);
+                    closeModal('examplesModal');
+                    showToast('已加载示例策略');
+                }
+            } catch (error) { showToast('加载失败', 'error'); }
+        }
+
+        function applyPreviewCode() {
+            if (previewCode) {
+                setEditorCode(previewCode);
+                closeModal('codePreviewModal');
+                showToast('已应用到编辑器');
+            }
+        }
+
+        // ==================== 保存策略 ====================
+        // 手动保存策略版本（底部按钮和AI操作按钮共用）
+        async function saveStrategy() {
+            await saveCurrentStrategy();
+        }
+
+        async function saveToHistory(code, autoSave = false) {
+            if (!code || code.length < 50) return;
+            if (code === lastSavedCode) {
+                if (!autoSave) showToast('代码未变化');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/history/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        code: code,
+                        auto_save: autoSave,
+                        workspace_id: currentWorkspaceId || ''
+                    })
+                });
+                const data = await response.json();
+                
+                if (data.success && !data.skipped) {
+                    lastSavedCode = code;
+                    if (!autoSave) {
+                        showToast('已保存到历史版本');
+                    }
+                    // 刷新历史列表（如果当前在历史标签）
+                    if (document.getElementById('tabHistory').classList.contains('active')) {
+                        loadHistory();
+                    }
+                } else if (!autoSave && data.skipped) {
+                    showToast('代码未变化');
+                }
+            } catch (error) {
+                if (!autoSave) showToast('保存失败', 'error');
+            }
+        }
+
+        // ==================== 工具函数 ====================
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function escapeForJs(str) {
+            return str.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
+        }
+
+        // 前端代码提取（作为后备）
+        function extractCodeFromText(text) {
+            if (!text) return null;
+            
+            // 尝试提取完整的 ```python 代码块
+            let match = text.match(/```python\s*([\s\S]*?)```/);
+            if (match && match[1] && match[1].trim().length > 50) {
+                return match[1].trim();
+            }
+            
+            // 尝试提取完整的 ```py 代码块
+            match = text.match(/```py\s*([\s\S]*?)```/);
+            if (match && match[1] && match[1].trim().length > 50) {
+                return match[1].trim();
+            }
+            
+            // 尝试提取普通 ``` 代码块
+            const matches = text.match(/```\s*([\s\S]*?)```/g);
+            if (matches) {
+                for (const m of matches) {
+                    const code = m.replace(/```\w*\s*/g, '').replace(/```/g, '').trim();
+                    if (code.length > 50 && (code.includes('def ') || code.includes('import ') || code.includes('class '))) {
+                        return code;
+                    }
+                }
+            }
+            
+            // 处理不完整的代码块（有开头没结尾，续写时可能发生）
+            match = text.match(/```python\s*([\s\S]*)$/);
+            if (match && match[1]) {
+                const code = match[1].trim();
+                if (code.length > 100 && (code.includes('def ') || code.includes('import '))) {
+                    return code;
+                }
+            }
+            
+            // 处理 ```py 开头的不完整代码块
+            match = text.match(/```py\s*([\s\S]*)$/);
+            if (match && match[1]) {
+                const code = match[1].trim();
+                if (code.length > 100 && (code.includes('def ') || code.includes('import '))) {
+                    return code;
+                }
+            }
+            
+            return null;
+        }
+
+        function showToast(message, type = 'success') {
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 2000);
+        }
+
+        // 点击模态框外部关闭
+        document.querySelectorAll('.modal-overlay').forEach(overlay => {
+            overlay.addEventListener('click', function(e) {
+                if (e.target === this) this.classList.remove('active');
+            });
+        });
+    </script>
+</body>
+</html>
