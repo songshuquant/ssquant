@@ -11,6 +11,51 @@ from typing import Dict, List, Any, Optional
 import pandas as pd
 import numpy as np
 
+# 自定义JSON编码器，处理NumPy和pandas数据类型
+class NumpyEncoder(json.JSONEncoder):
+    """处理 NumPy/pandas 数据类型的 JSON 序列化
+    
+    解决 pd.read_sql_query 读取整数类型（如成交价）时，
+    返回 np.int64 导致 json.dumps 报错的问题。
+    
+    兼容性：Python 3.9+, NumPy 1.x/2.x, pandas 1.x/2.x
+    """
+    def default(self, obj):
+        # NumPy 整数类型（np.integer 是所有 numpy 整数的基类）
+        if isinstance(obj, np.integer):
+            return int(obj)
+        # NumPy 浮点类型（np.floating 是所有 numpy 浮点的基类）
+        if isinstance(obj, np.floating):
+            return float(obj)
+        # NumPy 布尔类型
+        if isinstance(obj, np.bool_):
+            return bool(obj)
+        # NumPy 数组
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        # pandas Timestamp 或其他带 isoformat 的时间类型
+        if hasattr(obj, 'isoformat'):
+            return obj.isoformat()
+        # 处理 pandas NA/NaN 值（需要 try-except 因为某些类型会报错）
+        try:
+            if pd.isna(obj):
+                return None
+        except (TypeError, ValueError):
+            pass
+        # 兜底：通过类型名称判断（处理某些版本差异导致的遗漏）
+        type_name = type(obj).__name__.lower()
+        if 'int' in type_name:
+            try:
+                return int(obj)
+            except (TypeError, ValueError):
+                pass
+        if 'float' in type_name:
+            try:
+                return float(obj)
+            except (TypeError, ValueError):
+                pass
+        return super().default(obj)
+
 # Plotly 导入
 try:
     import plotly.graph_objects as go
@@ -1190,11 +1235,11 @@ class HTMLReportGenerator:
             source_comparison_section=source_comparison_section,
             source_tabs=source_tabs,
             source_details=source_details,
-            profit_data_sources=json.dumps(profit_data_sources),
-            combined_profit_data=json.dumps(combined_profit_data),
-            drawdown_data_sources=json.dumps(drawdown_data_sources),
-            combined_drawdown_data=json.dumps(combined_drawdown_data),
-            kline_data_sources=json.dumps(kline_data_sources)
+            profit_data_sources=json.dumps(profit_data_sources, cls=NumpyEncoder),
+            combined_profit_data=json.dumps(combined_profit_data, cls=NumpyEncoder),
+            drawdown_data_sources=json.dumps(drawdown_data_sources, cls=NumpyEncoder),
+            combined_drawdown_data=json.dumps(combined_drawdown_data, cls=NumpyEncoder),
+            kline_data_sources=json.dumps(kline_data_sources, cls=NumpyEncoder)
         )
         
         # 保存文件
