@@ -340,33 +340,39 @@ python app.py
 ## 🏗️ 项目结构
 
 ```
-ssquant/
-├── api/                    # 策略API
-│   └── strategy_api.py     # 核心API类
-├── backtest/               # 回测引擎
-│   ├── unified_runner.py   # 统一运行器
-│   ├── backtest_core.py    # 回测核心
-│   └── live_trading_adapter.py  # 实盘适配器
-├── config/                 # 配置管理
-│   └── trading_config.py   # 配置生成（账户配置在此）
-├── data/                   # 数据管理
-│   ├── api_data_fetcher.py # API数据获取
-│   └── local_data_loader.py # 本地数据加载
-├── ctp/                    # CTP二进制文件
-│   ├── py39/ ~ py314/      # 各Python版本的CTP文件
-│   └── loader.py           # CTP加载器
-├── pyctp/                  # CTP封装
-│   ├── simnow_client.py    # SIMNOW客户端
-│   └── real_trading_client.py  # 实盘客户端
-└── indicators/             # 技术指标
-    └── tech_indicators.py
-
-ai_agent/                   # 🤖 AI智能助手（独立工具）
-├── app.py                  # Flask Web应用
-├── templates/index.html    # 前端界面
-├── settings.json           # 配置文件
-├── requirements.txt        # 依赖清单
-└── README.md               # 使用说明
+ssquant-main/                   # 📁 项目根目录
+├── ssquant/                    # 核心框架
+│   ├── api/                    # 策略API
+│   │   └── strategy_api.py     # 核心API类
+│   ├── backtest/               # 回测引擎
+│   │   ├── unified_runner.py   # 统一运行器
+│   │   ├── backtest_core.py    # 回测核心
+│   │   └── live_trading_adapter.py  # 实盘适配器
+│   ├── config/                 # 配置管理
+│   │   └── trading_config.py   # 配置生成（账户配置在此）
+│   ├── data/                   # 数据管理
+│   │   ├── api_data_fetcher.py # API数据获取
+│   │   └── local_data_loader.py # 本地数据加载
+│   ├── ctp/                    # CTP二进制文件
+│   │   ├── py39/ ~ py314/      # 各Python版本的CTP文件
+│   │   └── loader.py           # CTP加载器
+│   ├── pyctp/                  # CTP封装
+│   │   ├── simnow_client.py    # SIMNOW客户端
+│   │   └── real_trading_client.py  # 实盘客户端
+│   └── indicators/             # 技术指标
+│       └── tech_indicators.py
+│
+├── ai_agent/                   # 🤖 AI智能助手（独立工具）
+│   ├── app.py                  # Flask Web应用
+│   ├── templates/index.html    # 前端界面
+│   ├── settings.json           # 配置文件
+│   ├── requirements.txt        # 依赖清单
+│   └── README.md               # 使用说明
+│
+├── examples/                   # 📚 策略示例（19个）
+├── backtest_results/           # 📊 回测报告输出
+├── backtest_logs/              # 📝 回测日志
+└── data_cache/                 # 💾 数据缓存
 ```
 
 ---
