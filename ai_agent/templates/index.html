@@ -5,16 +5,90 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SSQuant AI Agent - 量化策略智能体</title>
     
-    <!-- Monaco Editor -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/editor/editor.main.min.css">
+    <!-- Monaco Editor - 本地化 -->
+    <link rel="stylesheet" href="/static/node_modules/monaco-editor/min/vs/editor/editor.main.css">
     
-    <!-- Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Fonts - 使用系统字体（无需外部加载，更快） -->
+    <style>
+        /* 使用系统字体栈，无需下载 */
+        :root {
+            /* 代码字体：优先使用系统等宽字体 */
+            --font-mono: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', Consolas, 'Courier New', monospace;
+            /* 界面字体：优先使用系统中文字体 */
+            --font-sans: 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+    </style>
     
-    <!-- Marked for Markdown -->
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Favicon 避免404 -->
+    <link rel="icon" href="data:,">
+    
+    <!-- Marked for Markdown - 本地化 -->
+    <script src="/static/node_modules/marked/marked.min.js"></script>
+    <script>
+        // 安全的 marked.parse 封装（带 fallback）
+        function safeMarkedParse(text) {
+            if (typeof marked !== 'undefined' && marked.parse) {
+                return marked.parse(text);
+            }
+            // fallback: 简单的 markdown 转换
+            if (!text) return '';
+            return text
+                .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code class="language-$1">$2</code></pre>')
+                .replace(/`([^`]+)`/g, '<code>$1</code>')
+                .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+                .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+                .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+                .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+                .replace(/^- (.+)$/gm, '<li>$1</li>')
+                .replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>')
+                .replace(/\n/g, '<br>');
+        }
+        
+        // ==================== 资源加载状态检查 ====================
+        console.log('%c========== SSQuant AI Agent 资源加载状态 ==========', 'color: #3b82f6; font-weight: bold; font-size: 14px;');
+        
+        // 检查 marked.js
+        if (typeof marked !== 'undefined' && marked.parse) {
+            console.log('%c✅ marked.js 加载成功', 'color: #10b981; font-weight: bold;', '- 版本:', marked.version || 'unknown');
+        } else {
+            console.log('%c❌ marked.js 加载失败 (使用 fallback)', 'color: #ef4444; font-weight: bold;');
+        }
+        
+        // 页面加载完成后检查其他资源
+        window.addEventListener('DOMContentLoaded', function() {
+            // 检查 Monaco Editor CSS
+            var monacoCSS = document.querySelector('link[href*="monaco-editor"]');
+            if (monacoCSS && monacoCSS.sheet) {
+                console.log('%c✅ Monaco Editor CSS 加载成功', 'color: #10b981; font-weight: bold;');
+            } else {
+                console.log('%c⚠️ Monaco Editor CSS 可能未加载', 'color: #f59e0b; font-weight: bold;');
+            }
+            
+            // 检查字体 CSS 变量
+            var fontMono = getComputedStyle(document.documentElement).getPropertyValue('--font-mono');
+            var fontSans = getComputedStyle(document.documentElement).getPropertyValue('--font-sans');
+            if (fontMono && fontSans) {
+                console.log('%c✅ 系统字体变量已设置', 'color: #10b981; font-weight: bold;');
+                console.log('   --font-mono:', fontMono.trim().substring(0, 50) + '...');
+                console.log('   --font-sans:', fontSans.trim().substring(0, 50) + '...');
+            } else {
+                console.log('%c⚠️ 字体变量未设置', 'color: #f59e0b; font-weight: bold;');
+            }
+        });
+        
+        // Monaco Editor 加载完成后检查
+        window.addEventListener('load', function() {
+            setTimeout(function() {
+                if (typeof monaco !== 'undefined') {
+                    console.log('%c✅ Monaco Editor JS 加载成功', 'color: #10b981; font-weight: bold;');
+                } else {
+                    console.log('%c❌ Monaco Editor JS 加载失败', 'color: #ef4444; font-weight: bold;');
+                }
+                console.log('%c====================================================', 'color: #3b82f6; font-weight: bold;');
+            }, 1000);
+        });
+    </script>
     
     <style>
         :root {
@@ -43,7 +117,7 @@
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
         body {
-            font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+            font-family: var(--font-sans);
             background: var(--bg-primary);
             color: var(--text-primary);
             height: 100vh;
@@ -278,7 +352,7 @@
         .message-ai .message-content code {
             background: var(--bg-tertiary);
             padding: 2px 6px; border-radius: 4px;
-            font-family: 'JetBrains Mono', monospace; font-size: 13px;
+            font-family: var(--font-mono); font-size: 13px;
         }
         .message-ai .message-content pre {
             background: var(--bg-primary);
@@ -543,7 +617,7 @@
         /* Run Log */
         .run-log {
             background: var(--bg-primary); border-radius: 8px;
-            padding: 12px; font-family: 'JetBrains Mono', monospace;
+            padding: 12px; font-family: var(--font-mono);
             font-size: 12px; max-height: 200px; overflow-y: auto;
             margin-top: 16px;
         }
@@ -1093,8 +1167,8 @@
         </div>
     </div>
 
-    <!-- Monaco Editor -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
+    <!-- Monaco Editor - 本地化 -->
+    <script src="/static/node_modules/monaco-editor/min/vs/loader.js"></script>
     
     <script>
         // ==================== 全局变量 ====================
@@ -1117,7 +1191,7 @@
         let workspaceSaveTimer = null;
 
         // ==================== 初始化 ====================
-        require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs' } });
+        require.config({ paths: { vs: '/static/node_modules/monaco-editor/min/vs' } });
 
         require(['vs/editor/editor.main'], function() {
             monaco.editor.defineTheme('ssquant-dark', {
@@ -1580,7 +1654,7 @@
             const container = document.getElementById('chatMessages');
             const div = document.createElement('div');
             div.className = `message message-${role}`;
-            div.innerHTML = `<div class="message-content">${role === 'ai' ? marked.parse(content) : escapeHtml(content)}</div>`;
+            div.innerHTML = `<div class="message-content">${role === 'ai' ? safeMarkedParse(content) : escapeHtml(content)}</div>`;
             container.appendChild(div);
             smartScroll();
         }
@@ -1599,7 +1673,7 @@
         function updateMessageContent(id, content) {
             const msg = document.getElementById(id);
             if (msg) {
-                msg.querySelector('.message-content').innerHTML = marked.parse(content);
+                msg.querySelector('.message-content').innerHTML = safeMarkedParse(content);
                 smartScroll();
             }
         }
@@ -1648,7 +1722,7 @@
             // 更新消息内容
             const contentDiv = msg.querySelector('.message-content');
             if (contentDiv) {
-                contentDiv.innerHTML = successBadge + marked.parse(cleanedResponse) + actionButtons;
+                contentDiv.innerHTML = successBadge + safeMarkedParse(cleanedResponse) + actionButtons;
             }
         }
 
@@ -1691,7 +1765,7 @@
             // 更新消息内容
             const contentDiv = msg.querySelector('.message-content');
             if (contentDiv) {
-                contentDiv.innerHTML = successBadge + marked.parse(cleanedResponse) + actionButtons;
+                contentDiv.innerHTML = successBadge + safeMarkedParse(cleanedResponse) + actionButtons;
             }
         }
 
@@ -1964,7 +2038,7 @@
                 } else {
                     div.innerHTML = `
                         <div class="message-avatar">🤖</div>
-                        <div class="message-content">${marked.parse(msg.content)}</div>
+                        <div class="message-content">${safeMarkedParse(msg.content)}</div>
                     `;
                 }
                 chatMessages.appendChild(div);
