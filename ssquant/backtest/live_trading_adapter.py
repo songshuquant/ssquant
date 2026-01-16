@@ -1153,7 +1153,8 @@ class LiveTradingAdapter:
                  on_order_error_callback: Optional[Callable] = None,
                  on_cancel_error_callback: Optional[Callable] = None,
                  on_account_callback: Optional[Callable] = None,
-                 on_position_callback: Optional[Callable] = None):
+                 on_position_callback: Optional[Callable] = None,
+                 on_disconnect_callback: Optional[Callable] = None):
         """
         初始化实盘交易适配器
         
@@ -1170,6 +1171,7 @@ class LiveTradingAdapter:
             on_cancel_error_callback: 用户自定义撤单错误回调
             on_account_callback: 用户自定义账户资金回调
             on_position_callback: 用户自定义持仓回调
+            on_disconnect_callback: 用户自定义断开连接回调
         """
         self.mode = mode
         self.config = config
@@ -1183,6 +1185,7 @@ class LiveTradingAdapter:
         self.on_cancel_error_callback = on_cancel_error_callback
         self.on_account_callback = on_account_callback
         self.on_position_callback = on_position_callback
+        self.on_disconnect_callback = on_disconnect_callback
         
         # CTP客户端
         self.ctp_client: Optional[Union['SIMNOWClient', 'RealTradingClient']] = None
@@ -1473,6 +1476,7 @@ class LiveTradingAdapter:
             self.ctp_client.on_order_error = self._on_order_error
             self.ctp_client.on_cancel_error = self._on_cancel_error
             self.ctp_client.on_account = self._on_account
+            self.ctp_client.on_disconnected = self._on_disconnect
     
     def _init_data_source(self):
         """初始化数据源"""
@@ -2202,6 +2206,38 @@ class LiveTradingAdapter:
                 })
             except Exception as e:
                 print(f"[用户撤单错误回调错误] {e}")
+    
+    def _on_disconnect(self, source: str, reason: int):
+        """
+        连接断开回调
+        
+        Args:
+            source: 断开的连接类型，'md'=行情服务器, 'trader'=交易服务器
+            reason: 断开原因代码（CTP定义的错误码）
+        """
+        source_name = '行情服务器' if source == 'md' else '交易服务器'
+        
+        # 断开原因说明
+        reason_map = {
+            0x1001: '网络读取失败',
+            0x1002: '网络写入失败', 
+            0x2001: '接收心跳超时',
+            0x2002: '发送心跳超时',
+            0x2003: '收到错误报文',
+        }
+        reason_desc = reason_map.get(reason, '未知原因')
+        
+        print(f"\n{'!' * 60}")
+        print(f"[CTP断开] {source_name} 连接断开!")
+        print(f"[CTP断开] 原因码: {reason:#x} ({reason}) - {reason_desc}")
+        print(f"{'!' * 60}\n")
+        
+        # 调用用户自定义的断开连接回调
+        if self.on_disconnect_callback:
+            try:
+                self.on_disconnect_callback(source, reason)
+            except Exception as e:
+                print(f"[用户断开回调错误] {e}")
     
     def _on_account(self, data: Dict):
         """账户资金回调"""

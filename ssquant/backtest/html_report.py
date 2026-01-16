@@ -77,7 +77,7 @@ class HTMLReportGenerator:
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>回测报告 - {strategy_name}</title>
-    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    {plotly_script_tag}
     <style>
         * {{
             margin: 0;
@@ -1146,6 +1146,36 @@ class HTMLReportGenerator:
         else:
             print(message)
     
+    def _load_plotly_js(self) -> str:
+        """从本地加载 plotly.min.js，如果本地文件不存在则使用 CDN 备用
+        
+        Returns:
+            完整的 script 标签（内联 JS 或 CDN 引用）
+        """
+        # CDN 备用地址
+        CDN_URL = "https://cdn.bootcdn.net/ajax/libs/plotly.js/2.27.0/plotly.min.js"
+        
+        # 获取当前文件所在目录
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        # 构建 plotly.min.js 的路径 (相对于 ssquant/backtest/ -> ssquant/assets/)
+        plotly_path = os.path.join(current_dir, '..', 'assets', 'plotly.min.js')
+        plotly_path = os.path.normpath(plotly_path)
+        
+        try:
+            with open(plotly_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            self.log(f"已从本地加载 plotly.min.js: {plotly_path}")
+            # 返回内联 script 标签
+            return f'<script>{content}</script>'
+        except FileNotFoundError:
+            self.log(f"本地 plotly.min.js 未找到，使用 CDN 备用: {CDN_URL}")
+            # 返回 CDN 引用的 script 标签
+            return f'<script src="{CDN_URL}"></script>'
+        except Exception as e:
+            self.log(f"加载本地 plotly.min.js 失败 ({e})，使用 CDN 备用")
+            # 返回 CDN 引用的 script 标签
+            return f'<script src="{CDN_URL}"></script>'
+    
     def generate_report(self, results: Dict, multi_data_source=None, output_dir: str = "backtest_results") -> str:
         """生成 HTML 回测报告
         
@@ -1224,6 +1254,9 @@ class HTMLReportGenerator:
             start_date = '-'
             end_date = '-'
         
+        # 加载 plotly.js（本地优先，CDN 备用）
+        plotly_script_tag = self._load_plotly_js()
+        
         # 填充模板
         html = self.HTML_TEMPLATE.format(
             strategy_name=strategy_info,
@@ -1239,7 +1272,8 @@ class HTMLReportGenerator:
             combined_profit_data=json.dumps(combined_profit_data, cls=NumpyEncoder),
             drawdown_data_sources=json.dumps(drawdown_data_sources, cls=NumpyEncoder),
             combined_drawdown_data=json.dumps(combined_drawdown_data, cls=NumpyEncoder),
-            kline_data_sources=json.dumps(kline_data_sources, cls=NumpyEncoder)
+            kline_data_sources=json.dumps(kline_data_sources, cls=NumpyEncoder),
+            plotly_script_tag=plotly_script_tag
         )
         
         # 保存文件

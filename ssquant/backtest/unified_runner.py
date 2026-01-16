@@ -167,7 +167,8 @@ class UnifiedStrategyRunner:
             on_order_error: Optional[Callable] = None,
             on_cancel_error: Optional[Callable] = None,
             on_account: Optional[Callable] = None,
-            on_position: Optional[Callable] = None) -> Dict[str, Any]:
+            on_position: Optional[Callable] = None,
+            on_disconnect: Optional[Callable] = None) -> Dict[str, Any]:
         """
         运行策略
         
@@ -184,6 +185,7 @@ class UnifiedStrategyRunner:
             on_cancel_error: 撤单错误回调 - 撤单失败时触发
             on_account: 账户资金回调 - 资金变化时触发
             on_position: 持仓回调 - 持仓变化时触发
+            on_disconnect: 断开连接回调 - 与CTP服务器断开时触发
             
         Returns:
             运行结果字典
@@ -198,6 +200,7 @@ class UnifiedStrategyRunner:
         self.on_cancel_error_callback = on_cancel_error
         self.on_account_callback = on_account
         self.on_position_callback = on_position
+        self.on_disconnect_callback = on_disconnect
         
         print(f"\n{'='*80}")
         print(f"运行模式: {self.mode.value}")
@@ -327,7 +330,8 @@ class UnifiedStrategyRunner:
             on_order_error_callback=self.on_order_error_callback,
             on_cancel_error_callback=self.on_cancel_error_callback,
             on_account_callback=self.on_account_callback,
-            on_position_callback=self.on_position_callback
+            on_position_callback=self.on_position_callback,
+            on_disconnect_callback=self.on_disconnect_callback
         )
         
         # 运行
@@ -356,7 +360,8 @@ class UnifiedStrategyRunner:
             on_order_error_callback=self.on_order_error_callback,
             on_cancel_error_callback=self.on_cancel_error_callback,
             on_account_callback=self.on_account_callback,
-            on_position_callback=self.on_position_callback
+            on_position_callback=self.on_position_callback,
+            on_disconnect_callback=self.on_disconnect_callback
         )
         
         # 运行
