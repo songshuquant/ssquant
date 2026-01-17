@@ -55,24 +55,7 @@
 
 ### 1. 安装
 
-#### 方式一：使用 pip 安装（推荐）
-
-```bash
-pip install ssquant
-```
-
-> 💡 **新手安装指引 (解决环境问题)**
-> 
-> 如果遇到环境索引问题，请按以下步骤操作：
-> 1. **卸载旧版本**：`pip uninstall ssquant`
-> 2. **重新安装**（推荐使用国内源）：
->    ```bash
->    pip install ssquant -i https://pypi.tuna.tsinghua.edu.cn/simple
->    ```
-> 3. **获取示例**：新手朋友直接通过 pip 安装框架，然后到 [GitHub](https://github.com/songshuquant/ssquant) 或 [Gitee（国内推荐）](https://gitee.com/ssquant/ssquant) 下载 `examples/` 目录下的策略示例。
-> 4. **补充依赖**：运行中如果提示缺什么库，直接 `pip install 库名` 安装即可。
-
-#### 方式二：从 GitHub/Gitee 源码安装
+从 GitHub/Gitee 源码安装
 
 如果您下载了源码压缩包（通常解压后文件夹名为 `ssquant-main`），或者通过 git clone 拉取了代码：
 
