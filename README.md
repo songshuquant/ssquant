@@ -89,10 +89,8 @@ ModuleNotFoundError: No module named 'ssquant'
 
 2. 如果没有找到，重新安装：
    ```bash
-   # 方式一：从 PyPI 安装
-   pip install ssquant
    
-   # 方式二：从源码安装（在项目目录下执行）
+   # 从源码安装（在项目目录下执行）
    pip install -e .
    ```
 
