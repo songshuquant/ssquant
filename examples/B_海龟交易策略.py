@@ -304,15 +304,15 @@ if __name__ == "__main__":
             kline_period='1m',                # K线周期
             adjust_type='1',                  # 复权类型
             
-            # -------- 合约参数 --------
-            price_tick=0.02,                  # 最小变动价位 (黄金=0.02)
-            contract_multiplier=1000,         # 合约乘数 (黄金=1000克/手)
+            # -------- 合约参数（自动获取，无需手动填写）--------
+            # price_tick=自动,                # 最小变动价位（自动从远程获取）
+            # contract_multiplier=自动,       # 合约乘数（自动从远程获取）
             slippage_ticks=1,                 # 滑点跳数
             
             # -------- 资金配置 --------
             initial_capital=100000,           # 初始资金
-            commission=0.0001,                # 手续费率
-            margin_rate=0.1,                  # 保证金率
+            # commission=自动,                # 手续费率（自动从远程获取）
+            # margin_rate=自动,               # 保证金率（自动从远程获取）
             
             # -------- 数据窗口配置 --------
             lookback_bars=500,                # K线回溯窗口 (0=不限制，策略get_klines返回的最大条数)
@@ -329,11 +329,11 @@ if __name__ == "__main__":
             symbol='au2602',                  # 交易合约代码
             kline_period='1m',                # K线周期
             
-            # -------- 交易参数 --------
-            price_tick=0.02,                  # 最小变动价位
+            # -------- 交易参数（price_tick 自动获取）--------
+            # price_tick=自动,                # 最小变动价位（自动从远程获取）
             order_offset_ticks=10,            # 委托偏移跳数
             
-            # -------- 智能算法交易配置 (新增) --------
+            # -------- 智能算法交易配置 --------
             algo_trading=False,               # 启用算法交易
             order_timeout=10,                 # 订单超时时间(秒)
             retry_limit=3,                    # 最大重试次数
@@ -367,11 +367,11 @@ if __name__ == "__main__":
             symbol='au2602',                  # 交易合约代码
             kline_period='1m',                # K线周期
             
-            # -------- 交易参数 --------
-            price_tick=0.02,                  # 最小变动价位
+            # -------- 交易参数（price_tick 自动获取）--------
+            # price_tick=自动,                # 最小变动价位（自动从远程获取）
             order_offset_ticks=10,            # 委托偏移跳数
             
-            # -------- 智能算法交易配置 (新增) --------
+            # -------- 智能算法交易配置 --------
             algo_trading=False,               # 启用算法交易
             order_timeout=10,                 # 订单超时时间(秒)
             retry_limit=3,                    # 最大重试次数

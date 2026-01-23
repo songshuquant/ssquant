@@ -233,13 +233,18 @@ def on_position(data):
         PositionCost    - 持仓成本
         OpenCost        - 开仓成本
         Available       - 可用仓位
-    """
-    direction_map = {'1': '净', '2': '多', '3': '空'}
-    direction = direction_map.get(data.get('PosiDirection', ''), '未知')
     
-    print(f"[持仓] {data['InstrumentID']} {direction} "
-          f"总:{data.get('Position', 0)} "
-          f"(今:{data.get('TodayPosition', 0)} 昨:{data.get('YdPosition', 0)})")
+    注意：CTP会为每个方向返回一条记录（即使持仓为0），
+          所以这个回调可能被触发多次
+    """
+    # 只在有实际持仓时打印
+    position = data.get('Position', 0)
+    if position > 0:
+        direction_map = {'1': '净', '2': '多', '3': '空'}
+        direction = direction_map.get(data.get('PosiDirection', ''), '未知')
+        print(f"[持仓] {data['InstrumentID']} {direction} "
+              f"总:{position} "
+              f"(今:{data.get('TodayPosition', 0)} 昨:{data.get('YdPosition', 0)})")
 
 
 def tick_flow_strategy(api: StrategyAPI):
@@ -317,7 +322,7 @@ if __name__ == "__main__":
     
     # ==================== 用户配置区域 ====================
     # 运行模式: BACKTEST(回测) / SIMNOW(模拟盘) / REAL_TRADING(实盘)
-    RUN_MODE = RunMode.BACKTEST
+    RUN_MODE = RunMode.SIMNOW
     
     # 交易合约（SIMNOW/实盘用具体合约，回测用主连）
     SYMBOL = 'au2602'
@@ -334,9 +339,9 @@ if __name__ == "__main__":
             end_date='2026-01-31',         # 回测结束日期
             kline_period='tick',           # ⭐ 数据周期: tick=使用TICK数据回测
             
-            # -------- 回测成本参数 --------
-            price_tick=0.02,               # 最小变动价位（黄金=0.02, 白银=1, 螺纹=1）
-            contract_multiplier=1000,      # 合约乘数（黄金=1000, 白银=15, 螺纹=10）
+            # -------- 合约参数（自动获取，无需手动填写）--------
+            # price_tick=自动,             # 最小变动价位（自动从远程获取）
+            # contract_multiplier=自动,    # 合约乘数（自动从远程获取）
             slippage_ticks=1,              # 滑点跳数（模拟成交时的滑点）
             
             # -------- 数据窗口配置 --------
@@ -368,9 +373,9 @@ if __name__ == "__main__":
             # -------- 数据窗口配置 --------
             lookback_bars=1000,            # TICK回溯窗口 (高频策略建议1000-5000)
             
-            # -------- 交易参数 --------
-            price_tick=0.02,               # 最小变动价位（螺纹=1, 黄金=0.02）
-            order_offset_ticks=5,         # 超价跳数（确保成交，10跳=0.2元偏移）
+            # -------- 交易参数（price_tick 自动获取）--------
+            # price_tick=自动,             # 最小变动价位（自动从远程获取）
+            order_offset_ticks=5,          # 超价跳数（确保成交）
             
             # -------- 智能算法交易配置 (新增) --------
             algo_trading=False,             # 启用算法交易
@@ -412,11 +417,11 @@ if __name__ == "__main__":
             # -------- 数据窗口配置 --------
             lookback_bars=1000,            # TICK回溯窗口 (高频策略建议1000-5000)
             
-            # -------- 交易参数 --------
-            price_tick=0.02,               # 最小变动价位（黄金=0.02）
+            # -------- 交易参数（price_tick 自动获取）--------
+            # price_tick=自动,             # 最小变动价位（自动从远程获取）
             order_offset_ticks=5,          # 超价跳数
             
-            # -------- 智能算法交易配置 (新增) --------
+            # -------- 智能算法交易配置 --------
             algo_trading=False,             # 启用算法交易
             order_timeout=5,               # 订单超时时间(秒) - 高频策略超时要短
             retry_limit=3,                 # 最大重试次数

@@ -368,8 +368,8 @@ if __name__ == "__main__":
             start_date='2025-12-01',          # 回测开始日期
             end_date='2026-01-31',            # 回测结束日期
             initial_capital=100000,           # 初始资金 (元)
-            commission=0.0001,                # 手续费率 (万分之一)
-            margin_rate=0.1,                  # 保证金率 (10%)
+            # commission=自动,                # 手续费率（自动从远程获取）
+            # margin_rate=自动,               # 保证金率（自动从远程获取）
             
             # -------- 数据对齐配置 (多品种轮动必须开启) --------
             align_data=True,                  # 是否对齐多数据源的时间索引
@@ -379,37 +379,38 @@ if __name__ == "__main__":
             lookback_bars=500,                # K线回溯窗口 (0=不限制，策略get_klines返回的最大条数)
             
             # -------- 多品种数据源配置 (黑色系4品种) --------
+            # 注：data_sources 中的 price_tick/contract_multiplier 自动获取
             data_sources=[
                 {   # 数据源0: 螺纹钢主力连续
                     'symbol': 'rb888',        # 合约代码 (888=主力连续)
                     'kline_period': '1m',     # K线周期
                     'adjust_type': '1',       # 复权类型: '0'不复权, '1'后复权
-                    'price_tick': 1.0,        # 最小变动价位 (元)
-                    'contract_multiplier': 10,# 合约乘数 (吨/手)
+                    # 'price_tick': 自动,     # 最小变动价位（自动获取）
+                    # 'contract_multiplier': 自动,  # 合约乘数（自动获取）
                     'slippage_ticks': 1,      # 滑点跳数
                 },
                 {   # 数据源1: 热卷主力连续
                     'symbol': 'hc888',        # 合约代码
                     'kline_period': '1m',     # K线周期
                     'adjust_type': '1',       # 复权类型
-                    'price_tick': 1.0,        # 最小变动价位
-                    'contract_multiplier': 10,# 合约乘数
+                    # 'price_tick': 自动,     # 最小变动价位（自动获取）
+                    # 'contract_multiplier': 自动,  # 合约乘数（自动获取）
                     'slippage_ticks': 1,      # 滑点跳数
                 },
                 {   # 数据源2: 铁矿石主力连续
                     'symbol': 'i888',         # 合约代码
                     'kline_period': '1m',     # K线周期
                     'adjust_type': '1',       # 复权类型
-                    'price_tick': 0.5,        # 最小变动价位
-                    'contract_multiplier': 100,# 合约乘数 (100吨/手)
+                    # 'price_tick': 自动,     # 最小变动价位（自动获取）
+                    # 'contract_multiplier': 自动,  # 合约乘数（自动获取）
                     'slippage_ticks': 1,      # 滑点跳数
                 },
                 {   # 数据源3: 焦炭主力连续
                     'symbol': 'j888',         # 合约代码
                     'kline_period': '1m',     # K线周期
                     'adjust_type': '1',       # 复权类型
-                    'price_tick': 0.5,        # 最小变动价位
-                    'contract_multiplier': 100,# 合约乘数
+                    # 'price_tick': 自动,     # 最小变动价位（自动获取）
+                    # 'contract_multiplier': 自动,  # 合约乘数（自动获取）
                     'slippage_ticks': 1,      # 滑点跳数
                 },
             ],
@@ -423,11 +424,12 @@ if __name__ == "__main__":
             server_name='电信1',              # 服务器: 电信1/电信2/移动/TEST(盘后测试)
             
             # -------- 多品种配置 --------
+            # 注：price_tick 自动获取，如需手动指定请取消注释
             data_sources=[
                 {   # 数据源0: 螺纹钢
                     'symbol': 'rb2601',           # 合约代码 (具体月份)
                     'kline_period': '1m',         # K线周期
-                    'price_tick': 1.0,            # 最小变动价位 (元)
+                    # 'price_tick': 1.0,          # 最小变动价位（自动获取，手动指定请取消注释）
                     'order_offset_ticks': 5,      # 下单偏移跳数 (挂单距离)
                     
                     'algo_trading': False,        # 智能交易开关
@@ -442,7 +444,7 @@ if __name__ == "__main__":
                 {   # 数据源1: 热卷
                     'symbol': 'hc2601',           # 合约代码
                     'kline_period': '1m',         # K线周期
-                    'price_tick': 1.0,            # 最小变动价位
+                    # 'price_tick': 1.0,          # 最小变动价位（自动获取，手动指定请取消注释）
                     'order_offset_ticks': 5,      # 下单偏移跳数
                     
                     'algo_trading': False,        # 智能交易开关
@@ -457,7 +459,7 @@ if __name__ == "__main__":
                 {   # 数据源2: 铁矿石
                     'symbol': 'i2601',            # 合约代码
                     'kline_period': '1m',         # K线周期
-                    'price_tick': 0.5,            # 最小变动价位
+                    # 'price_tick': 0.5,          # 最小变动价位（自动获取，手动指定请取消注释）
                     'order_offset_ticks': 10,     # 下单偏移跳数
                     
                     'algo_trading': False,        # 智能交易开关
@@ -472,7 +474,7 @@ if __name__ == "__main__":
                 {   # 数据源3: 焦炭
                     'symbol': 'j2601',            # 合约代码
                     'kline_period': '1m',         # K线周期
-                    'price_tick': 0.5,            # 最小变动价位
+                    # 'price_tick': 0.5,          # 最小变动价位（自动获取，手动指定请取消注释）
                     'order_offset_ticks': 10,     # 下单偏移跳数
                     
                     'algo_trading': False,        # 智能交易开关
@@ -506,11 +508,12 @@ if __name__ == "__main__":
             account='real_default',           # 账户名称 (对应trading_config.py中的配置)
             
             # -------- 多品种配置 --------
+            # 注：price_tick 自动获取，如需手动指定请取消注释
             data_sources=[
                 {   # 数据源0: 螺纹钢
                     'symbol': 'rb2601',           # 合约代码 (具体月份)
                     'kline_period': '1m',         # K线周期
-                    'price_tick': 1.0,            # 最小变动价位 (元)
+                    # 'price_tick': 1.0,          # 最小变动价位（自动获取，手动指定请取消注释）
                     'order_offset_ticks': 5,      # 下单偏移跳数 (挂单距离)
                     
                     'algo_trading': False,        # 智能交易开关
@@ -525,7 +528,7 @@ if __name__ == "__main__":
                 {   # 数据源1: 热卷
                     'symbol': 'hc2601',           # 合约代码
                     'kline_period': '1m',         # K线周期
-                    'price_tick': 1.0,            # 最小变动价位
+                    # 'price_tick': 1.0,          # 最小变动价位（自动获取，手动指定请取消注释）
                     'order_offset_ticks': 5,      # 下单偏移跳数
                     
                     'algo_trading': False,        # 智能交易开关
@@ -540,7 +543,7 @@ if __name__ == "__main__":
                 {   # 数据源2: 铁矿石
                     'symbol': 'i2601',            # 合约代码
                     'kline_period': '1m',         # K线周期
-                    'price_tick': 0.5,            # 最小变动价位
+                    # 'price_tick': 0.5,          # 最小变动价位（自动获取，手动指定请取消注释）
                     'order_offset_ticks': 10,     # 下单偏移跳数
                     
                     'algo_trading': False,        # 智能交易开关
@@ -555,7 +558,7 @@ if __name__ == "__main__":
                 {   # 数据源3: 焦炭
                     'symbol': 'j2601',            # 合约代码
                     'kline_period': '1m',         # K线周期
-                    'price_tick': 0.5,            # 最小变动价位
+                    # 'price_tick': 0.5,          # 最小变动价位（自动获取，手动指定请取消注释）
                     'order_offset_ticks': 10,     # 下单偏移跳数
                     
                     'algo_trading': False,        # 智能交易开关

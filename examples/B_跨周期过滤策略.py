@@ -176,9 +176,9 @@ if __name__ == "__main__":
             start_date='2025-12-01',          # 回测开始日期
             end_date='2026-01-31',            # 回测结束日期
             initial_capital=100000,           # 初始资金 (元)
-            commission=0.0001,                # 手续费率 (万分之一)
-            margin_rate=0.1,                  # 保证金率 (10%)
-            debug=False,                      #显示api.log的输出，True=显示，False=不显示
+            # commission=自动,                # 手续费率（自动从远程获取）
+            # margin_rate=自动,               # 保证金率（自动从远程获取）
+            debug=False,                      # 显示api.log的输出，True=显示，False=不显示
             # -------- 数据对齐配置 (多周期时建议开启) --------
             align_data=True,                  # 是否对齐多数据源的时间索引
             fill_method='ffill',              # 缺失值填充方法: 'ffill'向前填充, 'bfill'向后填充
@@ -188,21 +188,22 @@ if __name__ == "__main__":
             
             # -------- 多周期数据源配置 (同品种2个周期) --------
             # 短周期用于入场信号，长周期用于趋势过滤
+            # 注：data_sources 中的 price_tick/contract_multiplier 自动获取
             data_sources=[
                 {   # 数据源0: 短周期 (入场信号)
                     'symbol': 'au888',        # 合约代码 (888=主力连续)
                     'kline_period': '1m',     # K线周期 (短周期)
                     'adjust_type': '1',       # 复权类型: '0'不复权, '1'后复权
-                    'price_tick': 0.02,       # 最小变动价位 (元)
-                    'contract_multiplier': 1000,# 合约乘数 (克/手)
+                    # 'price_tick': 自动,     # 最小变动价位（自动获取）
+                    # 'contract_multiplier': 自动,  # 合约乘数（自动获取）
                     'slippage_ticks': 1,      # 滑点跳数
                 },
                 {   # 数据源1: 长周期 (趋势过滤)
                     'symbol': 'au888',        # 合约代码
                     'kline_period': '15m',    # K线周期 (长周期)
                     'adjust_type': '1',       # 复权类型
-                    'price_tick': 0.02,       # 最小变动价位
-                    'contract_multiplier': 1000,# 合约乘数
+                    # 'price_tick': 自动,     # 最小变动价位（自动获取）
+                    # 'contract_multiplier': 自动,  # 合约乘数（自动获取）
                     'slippage_ticks': 1,      # 滑点跳数
                 },
             ]
@@ -216,11 +217,12 @@ if __name__ == "__main__":
             server_name='电信1',              # 服务器: 电信1/电信2/移动/TEST(盘后测试)
             
             # -------- 多周期数据源配置 --------
+            # 注：price_tick 自动获取，如需手动指定请取消注释
             data_sources=[
                 {   # 数据源0: 短周期 (入场信号)
                     'symbol': 'au2602',           # 合约代码 (具体月份)
                     'kline_period': '1m',         # K线周期 (短周期)
-                    'price_tick': 0.02,           # 最小变动价位 (元)
+                    # 'price_tick': 0.02,         # 最小变动价位（自动获取，手动指定请取消注释）
                     'order_offset_ticks': 10,     # 下单偏移跳数 (挂单距离)
                     
                     'algo_trading': False,        # 智能交易开关
@@ -235,7 +237,7 @@ if __name__ == "__main__":
                 {   # 数据源1: 长周期 (趋势过滤)
                     'symbol': 'au2602',           # 合约代码
                     'kline_period': '15m',        # K线周期 (长周期)
-                    'price_tick': 0.02,           # 最小变动价位
+                    # 'price_tick': 0.02,         # 最小变动价位（自动获取，手动指定请取消注释）
                     'order_offset_ticks': 10,     # 下单偏移跳数
                     
                     'algo_trading': False,        # 智能交易开关
@@ -269,11 +271,12 @@ if __name__ == "__main__":
             account='real_default',           # 账户名称 (对应trading_config.py中的配置)
             
             # -------- 多周期数据源配置 --------
+            # 注：price_tick 自动获取，如需手动指定请取消注释
             data_sources=[
                 {   # 数据源0: 短周期 (入场信号)
                     'symbol': 'au2602',           # 合约代码 (具体月份)
                     'kline_period': '1m',         # K线周期 (短周期)
-                    'price_tick': 0.02,           # 最小变动价位 (元)
+                    # 'price_tick': 0.02,         # 最小变动价位（自动获取，手动指定请取消注释）
                     'order_offset_ticks': 10,     # 下单偏移跳数 (挂单距离)
                     
                     'algo_trading': False,        # 智能交易开关
@@ -288,7 +291,7 @@ if __name__ == "__main__":
                 {   # 数据源1: 长周期 (趋势过滤)
                     'symbol': 'au2602',           # 合约代码
                     'kline_period': '15m',        # K线周期 (长周期)
-                    'price_tick': 0.02,           # 最小变动价位
+                    # 'price_tick': 0.02,         # 最小变动价位（自动获取，手动指定请取消注释）
                     'order_offset_ticks': 10,     # 下单偏移跳数
                     
                     'algo_trading': False,        # 智能交易开关

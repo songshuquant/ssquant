@@ -509,6 +509,9 @@ class HTMLReportGenerator:
             <div class="metrics-grid">
                 {combined_metrics_cards}
             </div>
+            <div style="margin-top: 15px; padding: 10px 15px; background: rgba(76, 175, 80, 0.1); border-radius: 8px; font-size: 12px; color: #aaa; border-left: 3px solid #4caf50;">
+                💡 <strong>说明：</strong>以上所有绩效指标均已扣除<span style="color: #81c784;">手续费</span>和<span style="color: #81c784;">滑点成本</span>（按配置的滑点跳数×最小变动价位计算）
+            </div>
         </div>
         
         <!-- 数据源对比表 -->
@@ -519,8 +522,8 @@ class HTMLReportGenerator:
             <div class="chart-title">
                 <span class="icon">📈</span>
                 利润曲线对比（盈亏走势）
+                <span style="font-size: 12px; color: #888; margin-left: 10px;">点击图例可显示/隐藏曲线</span>
             </div>
-            <div class="legend" id="profit-legend"></div>
             <div id="profit-chart"></div>
         </div>
         
@@ -562,10 +565,11 @@ class HTMLReportGenerator:
         // 利润曲线数据（从0开始，便于对比）
         var profitDataSources = {profit_data_sources};
         var combinedProfitData = {combined_profit_data};
+        var combinedGrossProfitData = {combined_gross_profit_data};
+        var priceDataSources = {price_data_sources};
         
         // 绘制利润曲线
         var profitTraces = [];
-        var legendHtml = '';
         
         // 添加各数据源的利润曲线
         profitDataSources.forEach(function(source, idx) {{
@@ -582,26 +586,60 @@ class HTMLReportGenerator:
                 }},
                 opacity: 0.7
             }});
-            legendHtml += '<div class="legend-item"><div class="legend-color" style="background:' + color + '"></div>' + source.name + '</div>';
         }});
         
-        // 添加综合利润曲线
+        // 添加综合毛利润曲线（不含成本，黄色虚线）
+        if (combinedGrossProfitData.dates && combinedGrossProfitData.dates.length > 0) {{
+            profitTraces.push({{
+                x: combinedGrossProfitData.dates,
+                y: combinedGrossProfitData.values,
+                type: 'scatter',
+                mode: 'lines',
+                name: '毛利润(不含成本)',
+                line: {{
+                    color: '#ffd54f',
+                    width: 2,
+                    dash: 'dash'
+                }},
+                opacity: 0.8
+            }});
+        }}
+        
+        // 添加综合净利润曲线（含成本，白色实线）
         if (combinedProfitData.dates && combinedProfitData.dates.length > 0) {{
             profitTraces.push({{
                 x: combinedProfitData.dates,
                 y: combinedProfitData.values,
                 type: 'scatter',
                 mode: 'lines',
-                name: '综合利润',
+                name: '净利润(扣除成本)',
                 line: {{
                     color: '#ffffff',
                     width: 2.5
                 }}
             }});
-            legendHtml += '<div class="legend-item"><div class="legend-color" style="background:#ffffff"></div>综合利润</div>';
         }}
         
-        document.getElementById('profit-legend').innerHTML = legendHtml;
+        // 添加价格曲线（使用右侧Y轴，默认隐藏）
+        var priceColors = ['#90caf9', '#a5d6a7', '#ffcc80', '#f48fb1', '#ce93d8'];
+        priceDataSources.forEach(function(source, idx) {{
+            var color = priceColors[idx % priceColors.length];
+            profitTraces.push({{
+                x: source.dates,
+                y: source.values,
+                type: 'scatter',
+                mode: 'lines',
+                name: source.name,
+                yaxis: 'y2',
+                line: {{
+                    color: color,
+                    width: 1,
+                    dash: 'dot'
+                }},
+                opacity: 0.6,
+                visible: 'legendonly'  // 默认隐藏，点击图例可显示
+            }});
+        }});
         
         // 使用最长数据源的时间作为统一的 X 轴类别
         var allDates = [];
@@ -627,19 +665,36 @@ class HTMLReportGenerator:
             yaxis: {{
                 gridcolor: 'rgba(255,255,255,0.1)',
                 tickformat: ',.0f',
-                title: '利润',
+                title: '利润(元)',
                 zeroline: true,
                 zerolinecolor: 'rgba(255,255,255,0.3)',
-                zerolinewidth: 1
+                zerolinewidth: 1,
+                side: 'left'
             }},
-            margin: {{ l: 70, r: 30, t: 30, b: 60 }},
+            yaxis2: {{
+                gridcolor: 'rgba(255,255,255,0.05)',
+                tickformat: ',.2f',
+                title: '价格/相对值',
+                overlaying: 'y',
+                side: 'right',
+                showgrid: false
+            }},
+            margin: {{ l: 70, r: 70, t: 30, b: 60 }},
             hovermode: 'x unified',
             hoverlabel: {{
                 bgcolor: '#fff',
                 font: {{ color: '#333', size: 13 }},
                 bordercolor: '#ccc'
             }},
-            showlegend: false,
+            showlegend: true,
+            legend: {{
+                orientation: 'h',
+                yanchor: 'bottom',
+                y: 1.02,
+                xanchor: 'left',
+                x: 0,
+                font: {{ size: 11 }}
+            }},
             dragmode: 'pan'
         }};
         
@@ -1228,8 +1283,14 @@ class HTMLReportGenerator:
         # 获取各数据源的利润曲线（从0开始，便于对比）
         profit_data_sources = self._get_profit_data_sources(filtered_results)
         
-        # 计算综合利润曲线
+        # 计算综合利润曲线（净利润：扣除成本）
         combined_profit_data = self._get_combined_profit_data(filtered_results)
+        
+        # 计算综合毛利润曲线（不扣除成本）
+        combined_gross_profit_data = self._get_combined_gross_profit_data(filtered_results)
+        
+        # 获取价格曲线数据（用于右侧Y轴显示）
+        price_data_sources = self._get_price_data_sources(filtered_results)
         
         # 计算各数据源的回撤（基于权益曲线计算，更准确）
         drawdown_data_sources = self._get_drawdown_from_results(filtered_results)
@@ -1270,6 +1331,8 @@ class HTMLReportGenerator:
             source_details=source_details,
             profit_data_sources=json.dumps(profit_data_sources, cls=NumpyEncoder),
             combined_profit_data=json.dumps(combined_profit_data, cls=NumpyEncoder),
+            combined_gross_profit_data=json.dumps(combined_gross_profit_data, cls=NumpyEncoder),
+            price_data_sources=json.dumps(price_data_sources, cls=NumpyEncoder),
             drawdown_data_sources=json.dumps(drawdown_data_sources, cls=NumpyEncoder),
             combined_drawdown_data=json.dumps(combined_drawdown_data, cls=NumpyEncoder),
             kline_data_sources=json.dumps(kline_data_sources, cls=NumpyEncoder),
@@ -1302,6 +1365,8 @@ class HTMLReportGenerator:
             'sharpe_ratio': 0,
             'profit_factor': 0,
             'total_commission': 0,
+            'total_slippage': 0,
+            'total_amount_profit': 0,
         }
         
         all_sharpe = []
@@ -1316,6 +1381,8 @@ class HTMLReportGenerator:
             metrics['win_trades'] += result.get('win_trades', 0)
             metrics['loss_trades'] += result.get('loss_trades', 0)
             metrics['total_commission'] += result.get('total_commission', 0)
+            metrics['total_slippage'] += result.get('total_slippage', 0)
+            metrics['total_amount_profit'] += result.get('total_amount_profit', 0)
             metrics['max_drawdown_pct'] = max(metrics['max_drawdown_pct'], result.get('max_drawdown_pct', 0))
             
             if result.get('sharpe_ratio'):
@@ -1381,6 +1448,52 @@ class HTMLReportGenerator:
         
         return profit_sources
     
+    def _get_price_data_sources(self, results: Dict) -> List[Dict]:
+        """获取各数据源的价格曲线数据（归一化为相对值，起点=100）"""
+        price_sources = []
+        num_sources = len(results)
+        
+        for key, result in results.items():
+            if 'data' not in result:
+                continue
+                
+            data = result['data']
+            if not isinstance(data, pd.DataFrame) or data.empty:
+                continue
+            
+            # 获取收盘价列
+            if 'close' in data.columns:
+                close_prices = data['close']
+            elif 'LastPrice' in data.columns:
+                close_prices = data['LastPrice']
+            else:
+                continue
+            
+            # 转换为列表
+            dates = [d.strftime('%Y-%m-%d %H:%M') if hasattr(d, 'strftime') else str(d) for d in close_prices.index]
+            
+            # 多数据源时使用归一化（相对值，起点=100）
+            if num_sources > 1:
+                first_price = close_prices.iloc[0] if close_prices.iloc[0] != 0 else 1
+                normalized_prices = (close_prices / first_price * 100).values.tolist()
+                values = normalized_prices
+                is_normalized = True
+            else:
+                # 单数据源直接使用原始价格
+                values = close_prices.values.tolist()
+                is_normalized = False
+            
+            name = f"{result.get('symbol', '')} {result.get('kline_period', '')}"
+            
+            price_sources.append({
+                'name': f"{name} 价格" if not is_normalized else f"{name} 相对值",
+                'dates': dates,
+                'values': values,
+                'is_normalized': is_normalized
+            })
+        
+        return price_sources
+    
     def _get_combined_profit_data(self, results: Dict) -> Dict:
         """获取综合利润曲线数据（所有数据源的利润相加）
         
@@ -1424,6 +1537,45 @@ class HTMLReportGenerator:
                     combined = combined + curve.reindex(common_indices)
         
         # 不做降采样，保留原始数据
+        dates = [d.strftime('%Y-%m-%d %H:%M') if hasattr(d, 'strftime') else str(d) for d in combined.index]
+        values = combined.values.tolist()
+        
+        return {'dates': dates, 'values': values}
+    
+    def _get_combined_gross_profit_data(self, results: Dict) -> Dict:
+        """获取综合毛利润曲线数据（不扣除成本）"""
+        all_gross_curves = []
+        
+        for key, result in results.items():
+            if 'gross_equity_curve' in result and isinstance(result['gross_equity_curve'], pd.Series):
+                initial_capital = result.get('initial_capital', 100000)
+                gross_profit_curve = result['gross_equity_curve'] - initial_capital
+                all_gross_curves.append(gross_profit_curve)
+        
+        if not all_gross_curves:
+            return {'dates': [], 'values': []}
+        
+        # 合并毛利润曲线
+        if len(all_gross_curves) == 1:
+            combined = all_gross_curves[0]
+        else:
+            # 使用交集：只保留所有数据源都有数据的时间点
+            common_indices = all_gross_curves[0].index
+            for curve in all_gross_curves[1:]:
+                common_indices = common_indices.intersection(curve.index)
+            
+            if len(common_indices) == 0:
+                base_curve = max(all_gross_curves, key=len)
+                combined = base_curve.copy()
+                for curve in all_gross_curves:
+                    if curve is not base_curve:
+                        aligned = curve.reindex(base_curve.index)
+                        combined = combined + aligned.fillna(0)
+            else:
+                combined = pd.Series(0.0, index=common_indices)
+                for curve in all_gross_curves:
+                    combined = combined + curve.reindex(common_indices)
+        
         dates = [d.strftime('%Y-%m-%d %H:%M') if hasattr(d, 'strftime') else str(d) for d in combined.index]
         values = combined.values.tolist()
         
@@ -1622,13 +1774,15 @@ class HTMLReportGenerator:
             return ''
         
         rows = []
-        headers = ['数据源', '初始资金', '期末权益', '总收益率', '交易次数', '胜率', '最大回撤', '夏普比率']
+        headers = ['数据源', '初始资金', '期末权益', '总收益率', '手续费', '滑点', '交易次数', '胜率', '最大回撤', '夏普比率']
         
         # 用于计算综合绩效的累加变量
         total_initial = 0
         total_final = 0
         total_trades = 0
         total_win_trades = 0
+        total_commission_all = 0
+        total_slippage_all = 0
         max_drawdown_all = 0
         all_sharpe = []
         
@@ -1645,12 +1799,16 @@ class HTMLReportGenerator:
             win_rate = result.get('win_rate', 0) * 100 if result.get('win_rate', 0) <= 1 else result.get('win_rate', 0)
             max_dd = result.get('max_drawdown_pct', 0)
             sharpe = result.get('sharpe_ratio', 0)
+            commission = result.get('total_commission', 0)
+            slippage = result.get('total_slippage', 0)
             
             # 累加综合数据
             total_initial += initial
             total_final += final
             total_trades += trades
             total_win_trades += win_trades
+            total_commission_all += commission
+            total_slippage_all += slippage
             max_drawdown_all = max(max_drawdown_all, max_dd)
             if sharpe:
                 all_sharpe.append((sharpe, initial))
@@ -1663,6 +1821,8 @@ class HTMLReportGenerator:
                 <td>{initial:,.0f}</td>
                 <td>{final:,.0f}</td>
                 <td class="{return_class}">{total_return:+.2f}%</td>
+                <td>{commission:,.2f}</td>
+                <td>{slippage:,.2f}</td>
                 <td>{trades}</td>
                 <td>{win_rate:.1f}%</td>
                 <td class="loss">-{max_dd:.2f}%</td>
@@ -1683,6 +1843,8 @@ class HTMLReportGenerator:
                 <td>{total_initial:,.0f}</td>
                 <td>{total_final:,.0f}</td>
                 <td class="{combined_return_class}">{combined_return:+.2f}%</td>
+                <td>{total_commission_all:,.2f}</td>
+                <td>{total_slippage_all:,.2f}</td>
                 <td>{total_trades}</td>
                 <td>{combined_win_rate:.1f}%</td>
                 <td class="loss">-{max_drawdown_all:.2f}%</td>
@@ -1846,6 +2008,8 @@ class HTMLReportGenerator:
             'sharpe_ratio': result.get('sharpe_ratio', 0),
             'profit_factor': result.get('profit_factor', 0),
             'total_commission': result.get('total_commission', 0),
+            'total_slippage': result.get('total_slippage', 0),
+            'total_amount_profit': result.get('total_amount_profit', 0),
         }
     
     def _generate_metrics_cards(self, metrics: Dict) -> str:
@@ -1856,13 +2020,16 @@ class HTMLReportGenerator:
             ('initial_capital', '初始资金', ',.0f', 'neutral'),
             ('final_equity', '期末权益', ',.0f', None),
             ('total_return', '总收益率', '+.2f', None, '%'),
+            ('total_amount_profit', '毛利润(不含成本)', ',.2f', None),
+            ('total_commission', '总手续费', ',.2f', 'neutral'),
+            ('total_slippage', '总滑点成本', ',.2f', 'neutral'),
+            ('total_net_profit', '净利润(扣除成本)', ',.2f', None),
             ('total_trades', '总交易次数', 'd', 'neutral'),
             ('win_rate', '胜率', '.2f', None, '%'),
             ('max_drawdown_pct', '最大回撤', '.2f', 'negative', '%'),
             ('annual_return', '年化收益率', '+.2f', None, '%'),
             ('sharpe_ratio', '夏普比率', '.2f', None),
             ('profit_factor', '盈亏比', '.2f', None),
-            ('total_commission', '总手续费', ',.2f', 'neutral'),
         ]
         
         for config in metric_configs:
@@ -1886,7 +2053,7 @@ class HTMLReportGenerator:
             
             if force_class:
                 value_class = force_class
-            elif key in ['total_return', 'annual_return', 'total_net_profit']:
+            elif key in ['total_return', 'annual_return', 'total_net_profit', 'total_amount_profit']:
                 value_class = 'positive' if value > 0 else 'negative' if value < 0 else 'neutral'
             elif key == 'win_rate':
                 value_class = 'positive' if value >= 50 else 'negative'

@@ -315,9 +315,11 @@ class RealTradingTraderSpi(TraderSpi):
                         # 没有昨仓，不重试，直接报错
                         print(f"[交易] 平今失败，但无昨仓可平，不重试")
             
-            print(f"[交易] 报单失败: {pRspInfo.ErrorID} - {full_msg}")
+            # 获取品种信息
+            instrument_id = pInputOrder.InstrumentID if pInputOrder else "未知品种"
+            print(f"[交易] 报单失败: {instrument_id} - {pRspInfo.ErrorID} - {full_msg}")
             if self.client.on_order_error:
-                self.client.on_order_error(pRspInfo.ErrorID, full_msg)
+                self.client.on_order_error(pRspInfo.ErrorID, full_msg, instrument_id)
     
     def OnRspOrderAction(self, pInputOrderAction, pRspInfo, nRequestID, bIsLast):
         """撤单请求响应"""
@@ -383,18 +385,7 @@ class RealTradingTraderSpi(TraderSpi):
             today_pos = data['TodayPosition']
             yd_pos = data['YdPosition']
             
-            if position == 0:
-                # 总持仓为0，说明无持仓
-                if today_pos > 0 or yd_pos > 0:
-                    # 如果今昨仓不为0，说明CTP系统数据未完全同步
-                    print(f"[持仓] {data['InstrumentID']} {direction} "
-                          f"总持仓: {position} (今:{today_pos} 昨:{yd_pos} - CTP数据同步延迟，实际已无持仓)")
-                else:
-                    print(f"[持仓] {data['InstrumentID']} {direction} 无持仓")
-            else:
-                # 有持仓，正常显示
-                print(f"[持仓] {data['InstrumentID']} {direction} "
-                      f"总持仓: {position} (今:{today_pos} 昨:{yd_pos})")
+            # 持仓状态由用户回调自行处理，框架保持安静
             
             # 更新内部持仓缓存（用于智能重试判断）
             instrument_id = data['InstrumentID']
@@ -413,7 +404,6 @@ class RealTradingTraderSpi(TraderSpi):
             self.client.on_position(data)
         
         if bIsLast and self.client.on_position_complete:
-            print(f"[持仓] 查询完成")
             self.client.on_position_complete()
     
     def OnRspQryOrder(self, pOrder, pRspInfo, nRequestID, bIsLast):

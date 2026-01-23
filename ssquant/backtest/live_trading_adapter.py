@@ -30,16 +30,19 @@ class DataRecorder:
     _write_queue = None
     _write_thread = None
     _running = False
+    _init_lock = threading.Lock()  # 初始化锁，防止竞态条件
     
     @classmethod
     def _init_write_thread(cls):
-        """初始化后台写入线程（只初始化一次）"""
+        """初始化后台写入线程（只初始化一次，线程安全）"""
         if cls._write_thread is None:
-            cls._write_queue = queue.Queue()
-            cls._running = True
-            cls._write_thread = threading.Thread(target=cls._write_worker, daemon=True)
-            cls._write_thread.start()
-            print("[数据记录器] 后台写入线程已启动")
+            with cls._init_lock:  # 双重检查锁定
+                if cls._write_thread is None:
+                    cls._write_queue = queue.Queue()
+                    cls._running = True
+                    cls._write_thread = threading.Thread(target=cls._write_worker, daemon=True)
+                    cls._write_thread.start()
+                    print("[数据记录器] 后台写入线程已启动")
     
     @classmethod
     def _write_worker(cls):
@@ -82,11 +85,10 @@ class DataRecorder:
     
     @classmethod
     def _do_write_db(cls, data: Dict, db_path: str, table_name: str, log: bool = False):
-        """实际执行DB写入"""
+        """实际执行DB写入（使用快速写入，不做去重检查）"""
         try:
-            from ..data.api_data_fetcher import append_to_sqlite
-            df = pd.DataFrame([data])
-            new_count = append_to_sqlite(df, db_path, table_name)
+            from ..data.api_data_fetcher import append_kline_fast
+            new_count = append_kline_fast(data, db_path, table_name)
             if log and new_count > 0:
                 # 提取K线详细信息
                 dt = data.get('datetime', '')
@@ -153,13 +155,24 @@ class DataRecorder:
         if save_kline_csv or save_tick_csv:
             os.makedirs(save_path, exist_ok=True)
         
-        # CSV文件名
+        # CSV文件名（K线文件包含周期，如 au2602_1m_kline_20260119.csv）
         date_str = datetime.now().strftime("%Y%m%d")
         self.tick_file = os.path.join(save_path, f"{symbol}_tick_{date_str}.csv")
-        self.kline_file = os.path.join(save_path, f"{symbol}_kline_{date_str}.csv")
+        self.kline_file = os.path.join(save_path, f"{symbol}_{kline_period}_kline_{date_str}.csv")
         
         # 根据复权类型确定K线表名后缀
         # TICK周期没有复权概念，不需要后缀
+        # 检查远程后复权开关，保持与 api_data_fetcher.py 一致
+        try:
+            from ..config.trading_config import ENABLE_REMOTE_ADJUST
+        except ImportError:
+            ENABLE_REMOTE_ADJUST = False
+        
+        if not ENABLE_REMOTE_ADJUST and adjust_type == '1':
+            print(f"[数据记录器] 远程服务器升级中暂不支持后复权，adjust_type 已从 '1' 强制改为 '0'")
+            adjust_type = '0'
+            self.adjust_type = '0'  # 同步更新实例属性
+        
         if kline_period.lower() == 'tick':
             self.kline_suffix = None  # TICK模式不保存K线到DB
         else:
@@ -178,7 +191,7 @@ class DataRecorder:
         if save_kline_db or save_tick_db:
             print(f"  DB路径: {db_path}")
             if save_kline_db and self.kline_suffix:
-                print(f"  K线表名: {self.continuous_symbol}_{kline_period}_{self.kline_suffix}")
+                print(f"  K线表名: {self.continuous_symbol}_{kline_period.upper()}_{self.kline_suffix}")
             if save_tick_db:
                 print(f"  TICK表名: {self.continuous_symbol}_tick")
     
@@ -223,7 +236,8 @@ class DataRecorder:
         
         if self.save_kline_db and self.kline_suffix:
             # TICK模式下 kline_suffix 为 None，跳过K线DB保存
-            table_name = f"{self.continuous_symbol}_{self.kline_period}_{self.kline_suffix}"
+            # 周期统一用大写（如 1M, 5M），与云端数据格式一致
+            table_name = f"{self.continuous_symbol}_{self.kline_period.upper()}_{self.kline_suffix}"
             DataRecorder._write_queue.put(('kline_db', kline_record.copy(), {'db_path': self.db_path, 'table_name': table_name}))
     
     def flush_all(self):
@@ -310,10 +324,6 @@ class LiveDataSource:
         # CTP客户端引用
         self.ctp_client: Optional[Union['SIMNOWClient', 'RealTradingClient']] = None
         
-        # 订单防重复机制
-        self.last_order_time = {}  # 记录每种操作的最后下单时间 {操作类型: 时间戳}
-        self.order_cooldown = 0.5  # 同一操作的冷却时间（秒）
-        
         # 未成交订单跟踪
         self.pending_orders = {}  # {OrderSysID: order_data}
         
@@ -338,6 +348,17 @@ class LiveDataSource:
         # 获取K线数量配置（默认100根）
         lookback_bars = config.get('history_lookback_bars', 100)
         adjust_type = config.get('adjust_type', '0')
+        
+        # 检查远程后复权开关，保持与 api_data_fetcher.py 一致
+        try:
+            from ..config.trading_config import ENABLE_REMOTE_ADJUST
+        except ImportError:
+            ENABLE_REMOTE_ADJUST = False
+        
+        if not ENABLE_REMOTE_ADJUST and adjust_type == '1':
+            print(f"[预加载] 远程服务器升级中暂不支持后复权，adjust_type 已从 '1' 强制改为 '0'")
+            adjust_type = '0'
+        
         # 用户自定义历史数据符号（如 rb888 主力或 rb777 次主力）
         history_symbol = config.get('history_symbol', None)
         
@@ -471,11 +492,45 @@ class LiveDataSource:
         self.current_price = tick_data['LastPrice']
         
         # 格式化时间（使用TradingDay业务日期 + UpdateTime最后修改时间）
+        # 【关键修复】CTP 的 TradingDay 是交易日而非自然日
+        # 夜盘 21:00-02:30 的 TradingDay 是下一个交易日
+        # 需要正确处理跨自然日的情况，避免时间"倒退"
         trading_day = tick_data['TradingDay']
         update_time = tick_data['UpdateTime']
         millisec = tick_data['UpdateMillisec']
         
-        datetime_str = f"{trading_day[:4]}-{trading_day[4:6]}-{trading_day[6:]} {update_time}.{millisec:03d}"
+        # 解析 update_time 的小时
+        hour = int(update_time.split(':')[0])
+        
+        # 修正日期：将 CTP 的交易日时间转换为自然日时间
+        # CTP 的 TradingDay 是交易日（周五夜盘的 TradingDay 是下周一）
+        # 我们需要转换为真实的自然日（周五夜盘应该是周五的日期）
+        # 
+        # 关键认识：
+        #   - 09:00-17:00 日盘：TradingDay 等于自然日
+        #   - 21:00-23:59 夜盘前半段：TradingDay 是下一个交易日，需要反查
+        #   - 00:00-02:30 夜盘后半段（凌晨）：TradingDay 已经是当天，直接用系统日期
+        # 
+        from datetime import datetime as dt
+        
+        if 9 <= hour < 17:  # 09:00-17:00 日盘时间
+            # 日盘时段，TradingDay 就是自然日
+            date_str = f"{trading_day[:4]}-{trading_day[4:6]}-{trading_day[6:]}"
+        elif hour >= 21:  # 21:00-23:59 夜盘前半段
+            # 使用交易日历反查上一个交易日
+            # 例如：周四晚 21:00，TradingDay=周五 → 返回周四
+            try:
+                from ..data.api_data_fetcher import get_prev_trading_day
+                date_str = get_prev_trading_day(trading_day)
+            except Exception:
+                # 回退方案：使用系统当前日期
+                date_str = dt.now().strftime('%Y-%m-%d')
+        else:  # 00:00-08:59 凌晨时段（夜盘后半段 + 早盘前）
+            # 凌晨夜盘（00:00-02:30）应该使用当前系统日期
+            # 因为这时候已经是新的一天了
+            date_str = dt.now().strftime('%Y-%m-%d')
+        
+        datetime_str = f"{date_str} {update_time}.{millisec:03d}"
         self.current_datetime = pd.to_datetime(datetime_str)
         
         # 保存完整的CTP原始数据，只添加datetime字段
@@ -499,76 +554,33 @@ class LiveDataSource:
         """获取当前持仓"""
         return self.current_pos
     
-    def _can_place_order(self, order_type: str, volume: int) -> bool:
-        """
-        检查是否可以下单（防重复机制）
-        
-        Args:
-            order_type: 订单类型（buy/sell/sellshort/buycover）
-            volume: 交易数量
-            
-        Returns:
-            bool: 是否可以下单
-        """
-        current_time = time.time()
-        
-        # 检查冷却时间
-        if order_type in self.last_order_time:
-            time_since_last = current_time - self.last_order_time[order_type]
-            if time_since_last < self.order_cooldown:
-                print(f"[防重复] {self.symbol} {order_type} 操作冷却中，距离上次下单{time_since_last:.2f}秒")
-                return False
-        
-        # 平仓操作额外检查持仓（支持锁仓情况）
-        if order_type in ['sell', 'buycover']:
-            # 获取多头和空头的实际持仓（不是净持仓）
-            long_pos = getattr(self, 'long_today', 0) + getattr(self, 'long_yd', 0)
-            short_pos = getattr(self, 'short_today', 0) + getattr(self, 'short_yd', 0)
-            
-            if order_type == 'sell':
-                # 卖出平多：检查多头持仓
-                if long_pos <= 0:
-                    print(f"[防重复] {self.symbol} 无多头持仓（long={long_pos}），跳过卖平操作")
-                    return False
-                if volume > long_pos:
-                    print(f"[防重复] {self.symbol} 平多数量({volume})超过多头持仓({long_pos})，调整为持仓数量")
-                    return False
-                    
-            if order_type == 'buycover':
-                # 买入平空：检查空头持仓
-                if short_pos <= 0:
-                    print(f"[防重复] {self.symbol} 无空头持仓（short={short_pos}），跳过买平操作")
-                    return False
-                if volume > short_pos:
-                    print(f"[防重复] {self.symbol} 平空数量({volume})超过空头持仓({short_pos})，调整为持仓数量")
-                    return False
-        
-        # 记录本次下单时间
-        self.last_order_time[order_type] = current_time
-        return True
-    
     def _get_kline_timestamp(self, dt: pd.Timestamp) -> pd.Timestamp:
         """根据K线周期获取K线时间戳"""
+        import re
         # 解析周期
         period = self.kline_period.lower()
         
-        if 'min' in period:
-            # 分钟线
-            minutes = int(period.replace('min', ''))
+        # 匹配分钟周期：1m, 5m, 15m, 30m, 1min, 5min 等
+        min_match = re.match(r'^(\d+)(m|min)$', period)
+        if min_match:
+            minutes = int(min_match.group(1))
             # 向下取整到对应的分钟
             new_minute = (dt.minute // minutes) * minutes
             return dt.replace(minute=new_minute, second=0, microsecond=0)
-        elif 'h' in period:
-            # 小时线
-            hours = int(period.replace('h', ''))
+        
+        # 匹配小时周期：1h, 2h, 1hour 等
+        hour_match = re.match(r'^(\d+)(h|hour)$', period)
+        if hour_match:
+            hours = int(hour_match.group(1))
             new_hour = (dt.hour // hours) * hours
             return dt.replace(hour=new_hour, minute=0, second=0, microsecond=0)
-        elif 'd' in period or period == 'day':
-            # 日线
+        
+        # 匹配日线：1d, d, day
+        if period in ['1d', 'd', 'day']:
             return dt.replace(hour=0, minute=0, second=0, microsecond=0)
-        else:
-            # 默认1分钟
-            return dt.replace(second=0, microsecond=0)
+        
+        # 默认1分钟
+        return dt.replace(second=0, microsecond=0)
     
     def _aggregate_kline(self, tick_data: Dict) -> Dict:  # type: ignore
         """聚合tick数据为K线 - 计算成交量增量和持仓量变化
@@ -586,6 +598,18 @@ class LiveDataSource:
         
         # 获取K线时间戳
         kline_time = self._get_kline_timestamp(self.current_datetime)
+        
+        # 【关键修复】处理历史数据预加载后的状态不一致问题
+        # 预加载只设置了 last_kline_time，但没有设置 current_kline
+        # 这会导致以下场景失败：
+        #   1. 同一分钟恢复：kline_time == last_kline_time，进入else但current_kline是None
+        #   2. 时间回退：kline_time < last_kline_time（异常数据），同上
+        # 解决方案：当检测到状态不一致时（有last_kline_time但无current_kline），
+        # 无条件重置 last_kline_time，让系统从第一个实盘tick开始创建新K线
+        if self.last_kline_time is not None and self.current_kline is None:
+            # 只在第一个实盘tick时触发（之后 current_kline 会被设置）
+            # 这确保历史数据的 last_kline_time 不会阻止实盘K线的创建
+            self.last_kline_time = None
         
         # 判断是否需要生成新K线
         if self.last_kline_time is None or kline_time > self.last_kline_time:
@@ -739,10 +763,6 @@ class LiveDataSource:
                 log_callback("[错误] CTP客户端未初始化")
             return
         
-        # 防重复检查
-        if not self._can_place_order('buy', volume):
-            return
-        
         # 确定委托价格
         if price is not None:
             # 显式指定价格
@@ -801,10 +821,6 @@ class LiveDataSource:
         if volume <= 0:
             if log_callback:
                 log_callback("[提示] 没有多头持仓，无需平仓")
-            return
-        
-        # 防重复检查
-        if not self._can_place_order('sell', volume):
             return
         
         # 检查总仓位是否足够，不足则自动调整
@@ -896,10 +912,6 @@ class LiveDataSource:
                 log_callback("[错误] CTP客户端未初始化")
             return
         
-        # 防重复检查
-        if not self._can_place_order('sellshort', volume):
-            return
-        
         # 确定委托价格
         if price is not None:
             limit_price = price
@@ -956,10 +968,6 @@ class LiveDataSource:
         if volume <= 0:
             if log_callback:
                 log_callback("[提示] 没有空头持仓，无需平仓")
-            return
-        
-        # 防重复检查
-        if not self._can_place_order('buycover', volume):
             return
         
         # 检查总仓位是否足够，不足则自动调整
@@ -1154,7 +1162,10 @@ class LiveTradingAdapter:
                  on_cancel_error_callback: Optional[Callable] = None,
                  on_account_callback: Optional[Callable] = None,
                  on_position_callback: Optional[Callable] = None,
-                 on_disconnect_callback: Optional[Callable] = None):
+                 on_position_complete_callback: Optional[Callable] = None,
+                 on_disconnect_callback: Optional[Callable] = None,
+                 on_query_trade_callback: Optional[Callable] = None,
+                 on_query_trade_complete_callback: Optional[Callable] = None):
         """
         初始化实盘交易适配器
         
@@ -1171,7 +1182,10 @@ class LiveTradingAdapter:
             on_cancel_error_callback: 用户自定义撤单错误回调
             on_account_callback: 用户自定义账户资金回调
             on_position_callback: 用户自定义持仓回调
+            on_position_complete_callback: 用户自定义持仓查询完成回调
             on_disconnect_callback: 用户自定义断开连接回调
+            on_query_trade_callback: 用户自定义成交查询回调（单条）
+            on_query_trade_complete_callback: 用户自定义成交查询完成回调
         """
         self.mode = mode
         self.config = config
@@ -1185,10 +1199,25 @@ class LiveTradingAdapter:
         self.on_cancel_error_callback = on_cancel_error_callback
         self.on_account_callback = on_account_callback
         self.on_position_callback = on_position_callback
+        self.on_position_complete_callback = on_position_complete_callback
         self.on_disconnect_callback = on_disconnect_callback
+        self.on_query_trade_callback = on_query_trade_callback
+        self.on_query_trade_complete_callback = on_query_trade_complete_callback
         
         # CTP客户端
         self.ctp_client: Optional[Union['SIMNOWClient', 'RealTradingClient']] = None
+        
+        # 账户信息（实时更新）
+        self.account_info = {
+            'balance': 0,           # 账户权益
+            'available': 0,         # 可用资金
+            'position_profit': 0,   # 持仓盈亏
+            'close_profit': 0,      # 平仓盈亏
+            'commission': 0,        # 手续费
+            'frozen_margin': 0,     # 冻结保证金
+            'curr_margin': 0,       # 占用保证金
+            'update_time': None,    # 更新时间
+        }
         
         # 数据源
         self.data_source: Optional[LiveDataSource] = None
@@ -1289,108 +1318,31 @@ class LiveTradingAdapter:
             self.ctp_client.wait_ready(timeout=30)
             
             # 查询持仓（同步到本地状态）
-            print("[实盘适配器] 查询账户持仓...")
-            
             # 重置持仓查询完成事件
             self._position_query_done.clear()
             
-            # 为每个数据源初始化临时持仓字典（每次查询前清空）
-            for ds in self.multi_data_source.data_sources:
-                ds._temp_position_dict = {
-                    'long': 0, 'short': 0,
-                    'long_today': 0, 'short_today': 0,
-                    'long_yd': 0, 'short_yd': 0
-                }
+            # 清除旧的持仓缓存（使用覆盖模式，每次查询开始时清空）
+            self._position_cache = {}
             
-            # 支持单数据源和多数据源
-            if 'data_sources' in self.config:
-                # 多数据源模式：查询所有品种的持仓
-                symbols = list(set([ds['symbol'] for ds in self.config['data_sources']]))
-                
-                # 记录需要查询的品种列表（用于判断是否全部查询完成）
-                self._pending_position_queries = set(symbols)
-                print(f"[持仓查询] 需要查询 {len(symbols)} 个品种: {', '.join(symbols)}")
-                
-                for symbol in symbols:
-                    self.ctp_client.query_position(symbol)
-                    time.sleep(0.5)  # 避免查询太频繁
-            else:
-                # 单数据源模式
-                self._pending_position_queries = set([self.config['symbol']])
-                self.ctp_client.query_position(self.config['symbol'])
+            # 【修复】使用空字符串查询所有持仓，避免大小写不匹配导致查不到
+            # CTP 的 ReqQryInvestorPosition 传空字符串会返回账户所有持仓
+            self._pending_position_queries = set([''])  # 只查询一次
+            self.ctp_client.query_position('')  # 空字符串 = 查询所有持仓
             
             # 等待持仓查询完成（事件驱动，最多等待10秒）
-            if not self._position_query_done.wait(timeout=10):
-                print("[警告] 持仓查询超时(10秒)，使用已收到的数据继续")
-            
-            # 打印持仓同步结果
-            print("✅ [实盘适配器] 持仓同步完成：")
-            for ds in self.multi_data_source.data_sources:
-                # 获取多空持仓数据
-                long_pos = getattr(ds, 'long_pos', 0)
-                short_pos = getattr(ds, 'short_pos', 0)
-                long_today = getattr(ds, 'long_today', 0)
-                short_today = getattr(ds, 'short_today', 0)
-                long_yd = getattr(ds, 'long_yd', 0)
-                short_yd = getattr(ds, 'short_yd', 0)
-                
-                if ds.current_pos != 0 or long_pos != 0 or short_pos != 0:
-                    print(f"  - {ds.symbol}:")
-                    print(f"      净持仓: {ds.current_pos} (今:{ds.today_pos}, 昨:{ds.yd_pos})")
-                    print(f"      多头: {long_pos} (今:{long_today}, 昨:{long_yd})")
-                    print(f"      空头: {short_pos} (今:{short_today}, 昨:{short_yd})")
-                else:
-                    print(f"  - {ds.symbol}: 无持仓")
+            self._position_query_done.wait(timeout=10)
         else:
             raise RuntimeError("CTP客户端初始化失败")
         
         # 启动策略线程
         self.running = True
         
-        # 品牌与免责声明
+        # 品牌与免责声明（在CTP连接就绪后显示）
         self._print_disclaimer()
-        
-        print("✅ [实盘适配器] 策略开始运行...")
-        
-        # 定期输出持仓汇总的计数器
-        position_summary_counter = 0
-        position_summary_interval = 60  # 每60秒输出一次持仓汇总
         
         try:
             while self.running:
                 time.sleep(1)
-                position_summary_counter += 1
-                
-                # 定期输出持仓汇总（方便对比策略持仓和实际账户持仓）
-                if position_summary_counter >= position_summary_interval:
-                    position_summary_counter = 0
-                    print(f"\n{'='*80}")
-                    print(f"[持仓汇总] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-                    print(f"{'='*80}")
-                    for ds in self.multi_data_source.data_sources:
-                        # 获取多空持仓数据
-                        long_pos = getattr(ds, 'long_pos', 0)
-                        short_pos = getattr(ds, 'short_pos', 0)
-                        long_today = getattr(ds, 'long_today', 0)
-                        short_today = getattr(ds, 'short_today', 0)
-                        long_yd = getattr(ds, 'long_yd', 0)
-                        short_yd = getattr(ds, 'short_yd', 0)
-                        
-                        # 判断是否有持仓
-                        has_position = (ds.current_pos != 0 or ds.today_pos != 0 or ds.yd_pos != 0 or
-                                       long_pos != 0 or short_pos != 0)
-                        
-                        if has_position:
-                            # 显示净持仓
-                            print(f"  {ds.symbol}:")
-                            print(f"    净持仓: {ds.current_pos} (今:{ds.today_pos} 昨:{ds.yd_pos})")
-                            
-                            # 始终显示多空持仓分离数据（便于诊断）
-                            print(f"    多头: {long_pos} (今:{long_today} 昨:{long_yd})")
-                            print(f"    空头: {short_pos} (今:{short_today} 昨:{short_yd})")
-                        else:
-                            print(f"  {ds.symbol}: 无持仓")
-                    print(f"{'='*80}\n")
         except KeyboardInterrupt:
             print("\n[实盘适配器] 用户中断")
         finally:
@@ -1477,6 +1429,8 @@ class LiveTradingAdapter:
             self.ctp_client.on_cancel_error = self._on_cancel_error
             self.ctp_client.on_account = self._on_account
             self.ctp_client.on_disconnected = self._on_disconnect
+            self.ctp_client.on_query_trade = self._on_query_trade
+            self.ctp_client.on_query_trade_complete = self._on_query_trade_complete
     
     def _init_data_source(self):
         """初始化数据源"""
@@ -1519,7 +1473,9 @@ class LiveTradingAdapter:
         context = {
             'data': self.multi_data_source,
             'log': self._log,
-            'params': self.strategy_params
+            'params': self.strategy_params,
+            'account_info': self.account_info,  # 账户信息引用
+            'ctp_client': self.ctp_client,      # CTP客户端引用
         }
         
         from ..api.strategy_api import create_strategy_api
@@ -1530,15 +1486,25 @@ class LiveTradingAdapter:
         # 获取合约代码
         symbol = data.get('InstrumentID', '')
         
-        # 找到对应的数据源并更新
+        # 找到对应的数据源并更新（同一品种可能有多个周期的数据源）
         completed_kline = None
         target_data_source = None
+        completed_klines = []  # 存储所有周期完成的K线
         
         for ds in self.multi_data_source.data_sources:
-            if ds.symbol == symbol:
-                completed_kline = ds.update_tick(data)
-                target_data_source = ds
-                break
+            # 使用大小写不敏感的匹配（CTP返回的合约代码可能与订阅时大小写不同）
+            if ds.symbol.upper() == symbol.upper():
+                kline = ds.update_tick(data)
+                # 记录每个周期完成的K线（用于数据保存）
+                if kline is not None:
+                    completed_klines.append((ds, kline))
+                    # 记录第一个完成K线的数据源（用于触发策略）
+                    if completed_kline is None:
+                        completed_kline = kline
+                        target_data_source = ds
+                elif target_data_source is None:
+                    target_data_source = ds
+                # 不break，继续更新同品种的其他周期数据源
         
         # 【关键修复】保存当前TICK数据，让策略能通过 api.get_tick() 获取
         # 在多数据源模式下，这样可以获取到"触发策略的那个TICK"
@@ -1548,24 +1514,27 @@ class LiveTradingAdapter:
         
         # 记录数据
         if target_data_source:
-            recorder_key = f"{symbol}_{target_data_source.kline_period}"
-            
             # TICK记录：同一品种只用第一个记录器记录（避免多周期重复）
-            # 初始化品种->记录器的映射（只在第一次时建立）
+            # 初始化品种->记录器的映射（只在第一次时建立，大小写不敏感）
             if not hasattr(self, '_symbol_tick_recorder'):
                 self._symbol_tick_recorder = {}
                 for key, recorder in self.data_recorders.items():
                     sym = key.rsplit('_', 1)[0]  # 从 rb2601_1m 提取 rb2601
-                    if sym not in self._symbol_tick_recorder:
-                        self._symbol_tick_recorder[sym] = recorder
+                    sym_upper = sym.upper()
+                    if sym_upper not in self._symbol_tick_recorder:
+                        self._symbol_tick_recorder[sym_upper] = recorder
             
-            # 用该品种对应的记录器记录 TICK
-            if symbol in self._symbol_tick_recorder:
-                self._symbol_tick_recorder[symbol].record_tick(data)
+            # 用该品种对应的记录器记录 TICK（大小写不敏感）
+            symbol_upper = symbol.upper()
+            if symbol_upper in self._symbol_tick_recorder:
+                self._symbol_tick_recorder[symbol_upper].record_tick(data)
             
-            # K线记录：每个周期独立记录
-            if recorder_key in self.data_recorders and completed_kline is not None:
-                self.data_recorders[recorder_key].record_kline(completed_kline)
+            # K线记录：每个周期独立记录（修复：记录所有周期完成的K线）
+            # 使用数据源自身的 symbol（保持原始大小写）
+            for ds, kline in completed_klines:
+                recorder_key = f"{ds.symbol}_{ds.kline_period}"
+                if recorder_key in self.data_recorders:
+                    self.data_recorders[recorder_key].record_kline(kline)
         
         if not self.running:
             return
@@ -1727,14 +1696,6 @@ class LiveTradingAdapter:
                             ds.long_yd = max(0, ds.long_yd - volume)
                         ds.long_pos = max(0, ds.long_pos - volume)
                 
-                # 【调试】输出持仓变化详情
-                print(f"[持仓更新-{symbol}] "
-                      f"净: {old_current_pos} → {ds.current_pos} "
-                      f"(今: {old_today_pos} → {ds.today_pos}, 昨: {old_yd_pos} → {ds.yd_pos})")
-                print(f"[多空持仓-{symbol}] "
-                      f"多: {ds.long_pos}(今:{ds.long_today} 昨:{ds.long_yd}) "
-                      f"空: {ds.short_pos}(今:{ds.short_today} 昨:{ds.short_yd})")
-                print(f"[验证] {ds.long_pos} - {ds.short_pos} = {ds.current_pos} (净持仓)")
                 break
         
         # 调用用户自定义的成交回调
@@ -1743,6 +1704,23 @@ class LiveTradingAdapter:
                 self.on_trade_callback(data)
             except Exception as e:
                 print(f"[用户成交回调错误] {e}")
+    
+    def _on_query_trade(self, data: Dict):
+        """成交查询回调（单条记录）"""
+        # 调用用户自定义的成交查询回调
+        if self.on_query_trade_callback:
+            try:
+                self.on_query_trade_callback(data)
+            except Exception as e:
+                print(f"[用户成交查询回调错误] {e}")
+    
+    def _on_query_trade_complete(self):
+        """成交查询完成回调"""
+        if self.on_query_trade_complete_callback:
+            try:
+                self.on_query_trade_complete_callback()
+            except Exception as e:
+                print(f"[用户成交查询完成回调错误] {e}")
     
     def _on_order(self, data: Dict):
         """报单回调"""
@@ -1921,102 +1899,39 @@ class LiveTradingAdapter:
                 print(f"[用户撤单回调错误] {e}")
     
     def _on_position(self, data: Dict):
-        """持仓回调 - 处理CTP返回的持仓数据"""
-        direction_map = {'1': '净', '2': '多', '3': '空'}
-        direction = direction_map.get(data['PosiDirection'], '未知')
-        symbol = data['InstrumentID']
+        """持仓回调 - 处理CTP返回的持仓数据（累加模式）
         
-        # 判断持仓状态并给出清晰的日志
-        position = data['Position']
+        注意：CTP 返回的是持仓明细，同一合约可能有多条记录（不同开仓日期）
+        需要累加所有 Position > 0 的记录，忽略 Position = 0 的记录
+        """
+        symbol = data['InstrumentID']
+        posi_direction = data['PosiDirection']
+        position = data.get('Position', 0)
         today_pos = data.get('TodayPosition', 0)
         yd_pos = data.get('YdPosition', 0)
         
-        # 【调试】输出原始持仓数据的所有关键字段
-        print(f"\n{'='*60}")
-        print(f"[持仓回调-原始数据] {symbol}")
-        print(f"  方向(PosiDirection): {data.get('PosiDirection', 'N/A')} ({direction})")
-        print(f"  总持仓(Position): {position}")
-        print(f"  今仓(TodayPosition): {today_pos}")
-        print(f"  昨仓(YdPosition): {yd_pos}")
-        print(f"  可用(Available): {data.get('Available', 'N/A')}")
-        print(f"  冻结(ShortVolume): {data.get('ShortVolume', 'N/A')}")
-        print(f"{'='*60}")
+        # 更新持仓到适配器级别的字典（按symbol+direction作为键）
+        if not hasattr(self, '_position_cache'):
+            self._position_cache = {}  # {(symbol, direction): {position, today, yd}}
         
-        if position == 0:
-            if today_pos > 0 or yd_pos > 0:
-                print(f"[持仓查询] {symbol} {direction} 总:{position} (今:{today_pos} 昨:{yd_pos}) - 实际已无持仓")
+        cache_key = (symbol, posi_direction)
+        
+        # 使用累加模式：CTP 返回的是持仓明细，同一合约可能有多条记录
+        # Position > 0 的记录需要累加，Position = 0 的记录忽略（不删除已有数据）
+        if position > 0:
+            if cache_key in self._position_cache:
+                # 累加到已有数据
+                self._position_cache[cache_key]['position'] += position
+                self._position_cache[cache_key]['today'] += today_pos
+                self._position_cache[cache_key]['yd'] += yd_pos
             else:
-                print(f"[持仓查询] {symbol} {direction} 无持仓")
-        else:
-            print(f"[持仓查询] {symbol} {direction} 总:{position} (今:{today_pos} 昨:{yd_pos})")
-        
-        # 更新持仓（找到对应的数据源）
-        for ds in self.multi_data_source.data_sources:
-            if ds.symbol == symbol:
-                posi_direction = data['PosiDirection']
-                
-                # 【调试】记录更新前的策略内部持仓（用于对比）
-                old_strategy_pos = ds.current_pos
-                old_strategy_today = ds.today_pos
-                old_strategy_yd = ds.yd_pos
-                
-                # 初始化临时持仓字典（如果不存在）
-                if not hasattr(ds, '_temp_position_dict'):
-                    ds._temp_position_dict = {'long': 0, 'short': 0, 'long_today': 0, 'short_today': 0, 'long_yd': 0, 'short_yd': 0}
-                
-                # 只处理有效持仓，CTP会返回多个方向的数据
-                # 注意：CTP可能返回多条相同方向的记录（如不同交易日开仓），需要累加而不是覆盖
-                if data['Position'] > 0:
-                    if posi_direction == '1':  # 净持仓（上期所期权）
-                        ds.current_pos += data['Position']
-                        ds.today_pos += data.get('TodayPosition', 0)
-                        ds.yd_pos += data.get('YdPosition', 0)
-                        print(f"[更新净持仓-{symbol}] current_pos={ds.current_pos}, today_pos={ds.today_pos}, yd_pos={ds.yd_pos}")
-                    elif posi_direction == '2':  # 多头
-                        # 记录到临时字典，等待合并（累加，因为CTP可能返回多条记录）
-                        ds._temp_position_dict['long'] += data['Position']
-                        ds._temp_position_dict['long_today'] += data.get('TodayPosition', 0)
-                        ds._temp_position_dict['long_yd'] += data.get('YdPosition', 0)
-                        print(f"[收到多头持仓-{symbol}] 本次+{data['Position']} → 累计多头={ds._temp_position_dict['long']} (今:{ds._temp_position_dict['long_today']} 昨:{ds._temp_position_dict['long_yd']})")
-                    elif posi_direction == '3':  # 空头
-                        # 记录到临时字典，等待合并（累加，因为CTP可能返回多条记录）
-                        ds._temp_position_dict['short'] += data['Position']
-                        ds._temp_position_dict['short_today'] += data.get('TodayPosition', 0)
-                        ds._temp_position_dict['short_yd'] += data.get('YdPosition', 0)
-                        print(f"[收到空头持仓-{symbol}] 本次+{data['Position']} → 累计空头={ds._temp_position_dict['short']} (今:{ds._temp_position_dict['short_today']} 昨:{ds._temp_position_dict['short_yd']})")
-                    
-                    # 【持仓不匹配检测】对比CTP持仓与策略内部持仓
-                    if old_strategy_pos != 0 or old_strategy_today != 0 or old_strategy_yd != 0:
-                        # 如果策略内部原本有持仓记录，检查是否与CTP一致
-                        if (ds.current_pos != old_strategy_pos or 
-                            ds.today_pos != old_strategy_today or 
-                            ds.yd_pos != old_strategy_yd):
-                            print(f"\n{'⚠️ '*20}")
-                            print(f"⚠️  [持仓不匹配警告] {symbol}")
-                            print(f"⚠️  ")
-                            print(f"⚠️  策略内部跟踪持仓:")
-                            print(f"⚠️    当前持仓: {old_strategy_pos}")
-                            print(f"⚠️    今仓: {old_strategy_today}")
-                            print(f"⚠️    昨仓: {old_strategy_yd}")
-                            print(f"⚠️  ")
-                            print(f"⚠️  CTP账户实际持仓:")
-                            print(f"⚠️    当前持仓: {ds.current_pos}")
-                            print(f"⚠️    今仓: {ds.today_pos}")
-                            print(f"⚠️    昨仓: {ds.yd_pos}")
-                            print(f"⚠️  ")
-                            print(f"⚠️  差异:")
-                            print(f"⚠️    当前持仓差: {ds.current_pos - old_strategy_pos}")
-                            print(f"⚠️    今仓差: {ds.today_pos - old_strategy_today}")
-                            print(f"⚠️    昨仓差: {ds.yd_pos - old_strategy_yd}")
-                            print(f"⚠️  ")
-                            print(f"⚠️  建议: 请回溯日志，查找导致偏差的成交记录")
-                            print(f"{'⚠️ '*20}\n")
-                else:
-                    # Position=0 时，不覆盖已有数据
-                    # 因为CTP可能返回多条记录，如果先收到有效持仓再收到空持仓，不应覆盖
-                    # 临时字典初始化时已经是0，无需重复设置
-                    print(f"[持仓忽略-{symbol}] 收到{direction}持仓=0的记录，不覆盖已有数据")
-                break
+                # 新建记录
+                self._position_cache[cache_key] = {
+                    'position': position,
+                    'today': today_pos,
+                    'yd': yd_pos
+                }
+        # Position=0 的记录直接忽略，不删除已有数据
         
         # 调用用户自定义的持仓回调
         if self.on_position_callback:
@@ -2046,94 +1961,88 @@ class LiveTradingAdapter:
         
         # 只有当所有品种都查询完成后才合并持仓
         if self._position_query_complete_count < expected_count:
-            print(f"[持仓查询] {self._position_query_complete_count}/{expected_count} 个品种查询完成，等待其他品种...")
             return
         
         # 重置计数器
         self._position_query_complete_count = 0
         
-        print("\n" + "="*80)
-        print(f"[持仓查询完成] 所有 {expected_count} 个品种持仓数据已收到，开始合并...")
-        print("="*80)
+        # 从适配器级别的缓存中提取持仓数据
+        # _position_cache: {(symbol, direction): {position, today, yd}}
+        position_cache = getattr(self, '_position_cache', {})
         
-        for ds in self.multi_data_source.data_sources:
-            print(f"\n处理数据源: {ds.symbol}")
+        # 按品种汇总多空持仓（使用大写键统一存储，解决大小写不敏感匹配）
+        symbol_positions = {}  # {symbol_upper: {long, short, long_today, ...}}
+        symbol_original = {}   # {symbol_upper: original_symbol} 保存原始大小写
+        
+        for (symbol, direction), pos_data in position_cache.items():
+            symbol_upper = symbol.upper()
+            if symbol_upper not in symbol_positions:
+                symbol_positions[symbol_upper] = {
+                    'long': 0, 'short': 0,
+                    'long_today': 0, 'short_today': 0,
+                    'long_yd': 0, 'short_yd': 0
+                }
+                symbol_original[symbol_upper] = symbol
             
-            if hasattr(ds, '_temp_position_dict'):
-                temp_pos = ds._temp_position_dict
-                print(f"  临时持仓字典: {temp_pos}")
-                
-                # 合并多空持仓：净持仓 = 多头 - 空头
-                long_pos = temp_pos.get('long', 0)
-                short_pos = temp_pos.get('short', 0)
-                long_today = temp_pos.get('long_today', 0)
-                short_today = temp_pos.get('short_today', 0)
-                long_yd = temp_pos.get('long_yd', 0)
-                short_yd = temp_pos.get('short_yd', 0)
-                
-                # 计算净持仓
-                net_pos = long_pos - short_pos
-                net_today = long_today - short_today
-                net_yd = long_yd - short_yd
-                
-                print(f"  计算结果: 多{long_pos}-空{short_pos}=净{net_pos}")
-                
-                # 更新净持仓到数据源
-                ds.current_pos = net_pos
-                ds.today_pos = net_today
-                ds.yd_pos = net_yd
-                
-                # 保存多空持仓分离数据（用于策略中单独访问）
-                ds.long_pos = long_pos
-                ds.short_pos = short_pos
-                ds.long_today = long_today
-                ds.short_today = short_today
-                ds.long_yd = long_yd
-                ds.short_yd = short_yd
-                
-                print(f"  [合并持仓-{ds.symbol}]")
-                print(f"    多头: {long_pos} (今:{long_today} 昨:{long_yd})")
-                print(f"    空头: {short_pos} (今:{short_today} 昨:{short_yd})")
-                print(f"    净持仓: {net_pos} (今:{net_today} 昨:{net_yd})")
-                
-                # 验证数据是否已正确设置到数据源
-                print(f"  验证数据源属性:")
-                print(f"    ds.long_pos = {getattr(ds, 'long_pos', 'N/A')}")
-                print(f"    ds.short_pos = {getattr(ds, 'short_pos', 'N/A')}")
-                
-                # 清除临时字典
-                del ds._temp_position_dict
-            else:
-                print(f"  ⚠️ 警告: {ds.symbol} 没有临时持仓字典！")
+            if direction == '2':  # 多头
+                symbol_positions[symbol_upper]['long'] = pos_data['position']
+                symbol_positions[symbol_upper]['long_today'] = pos_data['today']
+                symbol_positions[symbol_upper]['long_yd'] = pos_data['yd']
+            elif direction == '3':  # 空头
+                symbol_positions[symbol_upper]['short'] = pos_data['position']
+                symbol_positions[symbol_upper]['short_today'] = pos_data['today']
+                symbol_positions[symbol_upper]['short_yd'] = pos_data['yd']
         
-        print("="*80 + "\n")
+        # 【调试】打印查询到的持仓数据
+        if symbol_positions:
+            print(f"[持仓查询] CTP返回的持仓数据:")
+            for sym_upper, pos_data in symbol_positions.items():
+                orig_sym = symbol_original.get(sym_upper, sym_upper)
+                long_pos = pos_data.get('long', 0)
+                short_pos = pos_data.get('short', 0)
+                if long_pos > 0 or short_pos > 0:
+                    print(f"  - {orig_sym}: 多头={long_pos}手, 空头={short_pos}手")
+        
+        # 将持仓数据同步到所有数据源（大小写不敏感匹配）
+        for ds in self.multi_data_source.data_sources:
+            symbol_upper = ds.symbol.upper()
+            pos_data = symbol_positions.get(symbol_upper, {})
+            
+            long_pos = pos_data.get('long', 0)
+            short_pos = pos_data.get('short', 0)
+            long_today = pos_data.get('long_today', 0)
+            short_today = pos_data.get('short_today', 0)
+            long_yd = pos_data.get('long_yd', 0)
+            short_yd = pos_data.get('short_yd', 0)
+            
+            # 计算净持仓
+            net_pos = long_pos - short_pos
+            net_today = long_today - short_today
+            net_yd = long_yd - short_yd
+            
+            # 更新到数据源
+            ds.current_pos = net_pos
+            ds.today_pos = net_today
+            ds.yd_pos = net_yd
+            ds.long_pos = long_pos
+            ds.short_pos = short_pos
+            ds.long_today = long_today
+            ds.short_today = short_today
+            ds.long_yd = long_yd
+            ds.short_yd = short_yd
+        
+        # 调用用户自定义的持仓查询完成回调
+        if self.on_position_complete_callback:
+            try:
+                self.on_position_complete_callback()
+            except Exception as e:
+                print(f"[用户持仓查询完成回调错误] {e}")
         
         # 设置持仓查询完成事件
         self._position_query_done.set()
     
-    def _on_order_error(self, error_id: int, error_msg: str):
+    def _on_order_error(self, error_id: int, error_msg: str, instrument_id: str = ""):
         """订单错误回调"""
-        # 尝试解码GBK编码的错误信息
-        decoded_msg = ""
-        if isinstance(error_msg, bytes):
-            try:
-                decoded_msg = error_msg.decode('gbk')
-            except:
-                try:
-                    decoded_msg = error_msg.decode('utf-8', errors='ignore')
-                except:
-                    decoded_msg = str(error_msg)
-        elif isinstance(error_msg, str):
-            try:
-                # 如果是乱码字符串，尝试重新解码
-                decoded_msg = error_msg.encode('latin1').decode('gbk', errors='ignore')
-            except:
-                # 如果仍然失败，尝试用utf-8解码，忽略错误
-                try:
-                    decoded_msg = error_msg.encode('latin1').decode('utf-8', errors='ignore')
-                except:
-                    decoded_msg = error_msg  # 使用原始字符串
-        
         # 添加常见错误码说明（简洁版，只用中文描述）
         error_descriptions = {
             22: "合约不存在或未订阅",
@@ -2156,27 +2065,18 @@ class LiveTradingAdapter:
             95: "CTP不支持的价格类型（限价单/市价单）",
         }
         
-        # 优先使用简洁的中文描述（避免乱码）
-        desc = error_descriptions.get(error_id, "")
-        if desc:
-            print(f"❌ [订单错误] 错误码={error_id} - {desc}")
-        else:
-            # 如果没有预定义的描述，尝试显示解码后的消息
-            # 但如果看起来是乱码，就不显示
-            try:
-                if decoded_msg and not any(ord(c) > 127 and ord(c) < 256 for c in decoded_msg[:20]):
-                    print(f"❌ [订单错误] 错误码={error_id} - {decoded_msg}")
-                else:
-                    print(f"❌ [订单错误] 错误码={error_id} - 未知错误")
-            except:
-                print(f"❌ [订单错误] 错误码={error_id} - 未知错误")
+        # 优先使用简洁的中文描述
+        desc = error_descriptions.get(error_id, error_msg or "未知错误")
+        symbol_str = f" {instrument_id}" if instrument_id else ""
+        print(f"❌ [订单错误]{symbol_str} 错误码={error_id} - {desc}")
         
         # 调用用户自定义的报单错误回调
         if self.on_order_error_callback:
             try:
                 self.on_order_error_callback({
                     'ErrorID': error_id,
-                    'ErrorMsg': desc or decoded_msg or '未知错误'
+                    'ErrorMsg': desc,
+                    'InstrumentID': instrument_id
                 })
             except Exception as e:
                 print(f"[用户报单错误回调错误] {e}")
@@ -2241,18 +2141,17 @@ class LiveTradingAdapter:
     
     def _on_account(self, data: Dict):
         """账户资金回调"""
-        balance = data.get('Balance', 0)
-        available = data.get('Available', 0)
-        frozen = data.get('FrozenMargin', 0) + data.get('FrozenCommission', 0)
-        position_profit = data.get('PositionProfit', 0)
-        close_profit = data.get('CloseProfit', 0)
-        
-        print(f"\n💰 [账户资金]")
-        print(f"   权益: {balance:.2f}")
-        print(f"   可用: {available:.2f}")
-        print(f"   冻结: {frozen:.2f}")
-        print(f"   持仓盈亏: {position_profit:.2f}")
-        print(f"   平仓盈亏: {close_profit:.2f}")
+        # 更新内部账户信息
+        self.account_info = {
+            'balance': data.get('Balance', 0),
+            'available': data.get('Available', 0),
+            'position_profit': data.get('PositionProfit', 0),
+            'close_profit': data.get('CloseProfit', 0),
+            'commission': data.get('Commission', 0),
+            'frozen_margin': data.get('FrozenMargin', 0),
+            'curr_margin': data.get('CurrMargin', 0),
+            'update_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        }
         
         # 调用用户自定义的账户回调
         if self.on_account_callback:

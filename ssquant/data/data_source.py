@@ -8,7 +8,8 @@ class DataSource:
     数据源类，用于管理单个数据源的数据和交易操作
     """
     
-    def __init__(self, symbol: str, kline_period: str, adjust_type: str = '1', lookback_bars: int = 0):
+    def __init__(self, symbol: str, kline_period: str, adjust_type: str = '1', lookback_bars: int = 0,
+                 slippage_ticks: int = 1, price_tick: float = 1.0):
         """
         初始化数据源
         
@@ -17,11 +18,15 @@ class DataSource:
             kline_period: K线周期，如'1h', 'D'
             adjust_type: 复权类型，'0'表示不复权，'1'表示后复权
             lookback_bars: K线回溯窗口大小，0表示不限制（返回全部历史数据）
+            slippage_ticks: 滑点跳数，默认1跳
+            price_tick: 最小变动价位，默认1.0
         """
         self.symbol = symbol
         self.kline_period = kline_period
         self.adjust_type = adjust_type
         self.lookback_bars = lookback_bars  # K线回溯窗口大小
+        self.slippage_ticks = slippage_ticks  # 滑点跳数
+        self.price_tick = price_tick  # 最小变动价位
         self.data = pd.DataFrame()
         self.current_pos = 0
         self.target_pos = 0
@@ -80,8 +85,17 @@ class DataSource:
         """设置交易信号原因"""
         self.signal_reason = reason
         
-    def add_trade(self, action: str, price: float, volume: int, reason: str, datetime=None):
-        """添加交易记录"""
+    def add_trade(self, action: str, price: float, volume: int, reason: str, datetime=None, slippage_cost: float = 0):
+        """添加交易记录
+        
+        Args:
+            action: 交易动作
+            price: 成交价格（已含滑点）
+            volume: 交易数量
+            reason: 交易原因
+            datetime: 交易时间
+            slippage_cost: 滑点成本（元）
+        """
         if datetime is None:
             datetime = self.get_current_datetime()
         
@@ -90,7 +104,8 @@ class DataSource:
             'action': action,
             'price': price,
             'volume': volume,
-            'reason': ''  # 不再记录原因
+            'reason': '',  # 不再记录原因
+            'slippage_cost': slippage_cost  # 滑点成本
         })
         
     def get_price_by_type(self, order_type='bar_close'):
@@ -173,6 +188,15 @@ class DataSource:
                             # 如果完全无法获取价格，跳过此订单
                             continue
                 
+                # 应用滑点成本（买入加滑点，卖出减滑点）
+                slippage_per_unit = self.slippage_ticks * self.price_tick  # 每单位滑点金额
+                if action in ["开多", "平空", "平空开多"]:
+                    # 买入方向：价格上滑
+                    price = price + slippage_per_unit
+                elif action in ["开空", "平多", "平多开空"]:
+                    # 卖出方向：价格下滑
+                    price = price - slippage_per_unit
+                
                 # 更新持仓
                 if action == "开多":
                     self.target_pos = self.current_pos + volume
@@ -208,8 +232,8 @@ class DataSource:
                 # 更新持仓
                 self._update_pos(log_callback)
                 
-                # 记录交易
-                self.add_trade(action, price, volume, reason)
+                # 记录交易（包含单位滑点金额，用于后续计算滑点成本）
+                self.add_trade(action, price, volume, reason, slippage_cost=slippage_per_unit)
                 
                 if log_callback and debug_mode:
                     log_callback(f"{self.symbol} {self.kline_period} 执行订单: {action} {volume}手 成交价:{price:.2f} 类型:{order_type} 原因:{reason}")
@@ -885,7 +909,8 @@ class MultiDataSource:
         self.log_callback = callback
         
     def add_data_source(self, symbol: str, kline_period: str, adjust_type: str = '1', 
-                        data: Optional[pd.DataFrame] = None, lookback_bars: int = 0) -> int:
+                        data: Optional[pd.DataFrame] = None, lookback_bars: int = 0,
+                        slippage_ticks: int = 1, price_tick: float = 1.0) -> int:
         """
         添加数据源
         
@@ -895,11 +920,14 @@ class MultiDataSource:
             adjust_type: 复权类型，'0'表示不复权，'1'表示后复权
             data: 数据，如果为None则创建空数据源
             lookback_bars: K线回溯窗口大小，0表示不限制
+            slippage_ticks: 滑点跳数，默认1跳
+            price_tick: 最小变动价位，默认1.0
             
         Returns:
             数据源索引
         """
-        data_source = DataSource(symbol, kline_period, adjust_type, lookback_bars=lookback_bars)
+        data_source = DataSource(symbol, kline_period, adjust_type, lookback_bars=lookback_bars,
+                                 slippage_ticks=slippage_ticks, price_tick=price_tick)
         if data is not None:
             data_source.set_data(data)
         self.data_sources.append(data_source)

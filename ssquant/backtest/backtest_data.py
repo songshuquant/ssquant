@@ -176,36 +176,49 @@ class BacktestDataManager:
         self.data_dict = data_dict
         return data_dict
     
-    def create_data_sources(self, symbols_and_periods, data_dict, lookback_bars: int = 0):
+    def create_data_sources(self, symbols_and_periods, data_dict, lookback_bars: int = 0,
+                            symbol_configs: dict = None):
         """创建多数据源
         
         Args:
             symbols_and_periods: 品种和周期列表
             data_dict: 数据字典
             lookback_bars: K线回溯窗口大小，0表示不限制（返回全部历史数据）
+            symbol_configs: 品种配置字典，用于获取 slippage_ticks 和 price_tick
             
         Returns:
             multi_data_source: 多数据源实例
         """
+        symbol_configs = symbol_configs or {}
+        
         # 创建多数据源
         for i, item in enumerate(symbols_and_periods):
             symbol = item['symbol']
             kline_period = item['kline_period']
             adjust_type = item['adjust_type']
             
+            # 获取品种配置中的滑点和最小变动价位
+            config = symbol_configs.get(symbol, {})
+            slippage_ticks = config.get('slippage_ticks', 1)
+            price_tick = config.get('price_tick', 1.0)
+            
             # 获取数据
             key = f"{symbol}_{kline_period}_{adjust_type}"
             if key in data_dict:
                 data = data_dict[key]
-                # 添加数据源（传入lookback_bars参数）
+                # 添加数据源（传入lookback_bars、slippage_ticks、price_tick参数）
                 self.multi_data_source.add_data_source(symbol, kline_period, adjust_type, data, 
-                                                       lookback_bars=lookback_bars)
-                self.log(f"添加数据源 #{i}: {symbol} {kline_period} adjust_type={adjust_type} lookback={lookback_bars}")
+                                                       lookback_bars=lookback_bars,
+                                                       slippage_ticks=slippage_ticks,
+                                                       price_tick=price_tick)
+                self.log(f"添加数据源 #{i}: {symbol} {kline_period} adjust_type={adjust_type} lookback={lookback_bars} slippage={slippage_ticks}跳 price_tick={price_tick}")
             else:
                 # 如果没有获取到这个周期的数据，添加一个空数据源
                 self.log(f"警告：未找到 {symbol} {kline_period} adjust_type={adjust_type} 数据，添加空数据源")
                 self.multi_data_source.add_data_source(symbol, kline_period, adjust_type, 
-                                                       lookback_bars=lookback_bars)
+                                                       lookback_bars=lookback_bars,
+                                                       slippage_ticks=slippage_ticks,
+                                                       price_tick=price_tick)
         
         return self.multi_data_source
     

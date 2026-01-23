@@ -189,10 +189,11 @@ class MultiSourceBacktester:
             # 获取数据
             data_dict = self.data_manager.fetch_data(self.symbols_and_periods, self.symbol_configs, self.base_config)
             
-            # 创建多数据源（传入lookback_bars参数）
+            # 创建多数据源（传入lookback_bars和symbol_configs参数）
             lookback_bars = self.base_config.get('lookback_bars', 0)
             multi_data_source = self.data_manager.create_data_sources(
-                self.symbols_and_periods, data_dict, lookback_bars=lookback_bars
+                self.symbols_and_periods, data_dict, lookback_bars=lookback_bars,
+                symbol_configs=self.symbol_configs
             )
             
             # 对齐数据
@@ -220,11 +221,27 @@ class MultiSourceBacktester:
         # 记录回测开始时间
         start_time = time.time()
         
+        # 创建回测账户信息（实时更新）
+        initial_capital = self.base_config.get('initial_capital', 100000.0)
+        backtest_account_info = {
+            'balance': initial_capital,       # 账户权益
+            'available': initial_capital,     # 可用资金
+            'position_profit': 0,             # 持仓盈亏
+            'close_profit': 0,                # 平仓盈亏
+            'commission': 0,                  # 手续费
+            'frozen_margin': 0,               # 冻结保证金
+            'curr_margin': 0,                 # 占用保证金
+            'update_time': None,              # 更新时间
+            'initial_capital': initial_capital,  # 初始资金
+        }
+        
         # 创建策略上下文
         context = {
             'data': multi_data_source,
             'log': self.logger.log_message,
-            'params': strategy_params or {}
+            'params': strategy_params or {},
+            'account_info': backtest_account_info,  # 账户信息引用
+            'ctp_client': None,                     # 回测模式无CTP
         }
         
         # 创建策略API
@@ -287,6 +304,9 @@ class MultiSourceBacktester:
                     if not ds.data.empty and i < len(ds.data):
                         self.logger.log_message(f"数据源 #{j}: 时间={ds.current_datetime}, 价格={ds.current_price:.2f}, 持仓={ds.current_pos}")
             
+            # 更新回测账户信息
+            self._update_backtest_account(backtest_account_info, multi_data_source, self.symbol_configs)
+            
             # 运行策略
             strategy_func(api)
         
@@ -308,6 +328,63 @@ class MultiSourceBacktester:
         self._last_multi_data_source = multi_data_source
         
         return results
+    
+    def _update_backtest_account(self, account_info: dict, multi_data_source, symbol_configs: dict):
+        """
+        更新回测账户信息
+        
+        Args:
+            account_info: 账户信息字典（引用，会被直接修改）
+            multi_data_source: 多数据源容器
+            symbol_configs: 品种配置字典
+        """
+        initial_capital = account_info.get('initial_capital', 100000.0)
+        
+        # 计算持仓盈亏和保证金
+        total_position_profit = 0
+        total_close_profit = 0
+        total_margin = 0
+        total_commission = 0
+        
+        for ds in multi_data_source.data_sources:
+            # 获取品种配置
+            symbol = ds.symbol
+            config = symbol_configs.get(symbol, {})
+            contract_multiplier = config.get('contract_multiplier', 10)
+            margin_rate = config.get('margin_rate', 0.1)
+            
+            # 计算当前持仓市值和保证金
+            current_price = ds.current_price or 0
+            current_pos = ds.current_pos
+            
+            if current_pos != 0:
+                # 保证金 = 当前价格 * 持仓量 * 合约乘数 * 保证金率
+                margin = abs(current_pos) * current_price * contract_multiplier * margin_rate
+                total_margin += margin
+                
+                # 持仓盈亏需要知道开仓价格，这里简化处理
+                # 实际应该从交易记录中计算，这里暂时设为0
+            
+            # 累计平仓盈亏和手续费（从交易记录中获取）
+            for trade in ds.trades:
+                if 'net_profit' in trade:
+                    total_close_profit += trade['net_profit']
+                if 'commission' in trade:
+                    total_commission += trade['commission']
+        
+        # 更新账户信息
+        account_info['curr_margin'] = total_margin
+        account_info['close_profit'] = total_close_profit
+        account_info['commission'] = total_commission
+        account_info['position_profit'] = total_position_profit
+        account_info['balance'] = initial_capital + total_close_profit + total_position_profit - total_commission
+        account_info['available'] = account_info['balance'] - total_margin
+        
+        # 更新时间
+        for ds in multi_data_source.data_sources:
+            if ds.current_datetime:
+                account_info['update_time'] = str(ds.current_datetime)
+                break
     
     def run(self, strategy, initialize=None, strategy_params=None, silent_mode=False):
         """
@@ -504,10 +581,11 @@ class MultiSourceBacktester:
         # 获取数据
         data_dict = self.data_manager.fetch_data(self.symbols_and_periods, self.symbol_configs, self.base_config)
         
-        # 创建多数据源（传入lookback_bars参数）
+        # 创建多数据源（传入lookback_bars和symbol_configs参数）
         lookback_bars = self.base_config.get('lookback_bars', 0)
         multi_data_source = self.data_manager.create_data_sources(
-            self.symbols_and_periods, data_dict, lookback_bars=lookback_bars
+            self.symbols_and_periods, data_dict, lookback_bars=lookback_bars,
+            symbol_configs=self.symbol_configs
         )
         
         # 对齐数据

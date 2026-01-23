@@ -17,28 +17,30 @@ class ContractMapper:
     CONTINUOUS_SUFFIXES = ['888', '777', '000']
     
     @classmethod
-    def extract_product_code(cls, symbol: str) -> str:
+    def extract_product_code(cls, symbol: str, keep_case: bool = False) -> str:
         """
         提取品种代码（字母部分）
         
         Args:
             symbol: 合约代码
+            keep_case: 是否保持原始大小写，默认False（转小写）
             
         Returns:
-            品种代码（小写）
+            品种代码
             
         Examples:
             >>> ContractMapper.extract_product_code('rb2601')
             'rb'
-            >>> ContractMapper.extract_product_code('au2512')
-            'au'
             >>> ContractMapper.extract_product_code('IF2503')
             'if'
+            >>> ContractMapper.extract_product_code('IF2503', keep_case=True)
+            'IF'
         """
         match = re.match(cls.SYMBOL_PATTERN, symbol)
         if match:
-            return match.group(1).lower()
-        return symbol.lower()
+            code = match.group(1)
+            return code if keep_case else code.lower()
+        return symbol if keep_case else symbol.lower()
     
     @classmethod
     def is_continuous(cls, symbol: str) -> bool:
@@ -65,15 +67,15 @@ class ContractMapper:
     @classmethod
     def get_continuous_symbol(cls, specific_contract: str) -> str:
         """
-        从具体合约推导主连符号（简化版方案）
+        从具体合约推导主连符号（保持原始大小写）
         
-        规则：提取品种代码 + 888
+        规则：提取品种代码 + 888，保持原始大小写
         
         Args:
             specific_contract: 具体合约代码
             
         Returns:
-            主连合约代码
+            主连合约代码（保持原始大小写）
             
         Examples:
             >>> ContractMapper.get_continuous_symbol('rb2601')
@@ -81,14 +83,16 @@ class ContractMapper:
             >>> ContractMapper.get_continuous_symbol('au2512')
             'au888'
             >>> ContractMapper.get_continuous_symbol('IF2503')
-            'if888'
+            'IF888'
+            >>> ContractMapper.get_continuous_symbol('IM2602')
+            'IM888'
         """
-        # 如果本身就是主连，直接返回
+        # 如果本身就是主连，直接返回（保持原始大小写）
         if cls.is_continuous(specific_contract):
-            return specific_contract.lower()
+            return specific_contract
         
-        # 提取品种代码
-        product_code = cls.extract_product_code(specific_contract)
+        # 提取品种代码（保持原始大小写）
+        product_code = cls.extract_product_code(specific_contract, keep_case=True)
         
         # 拼接888后缀
         return f"{product_code}888"
@@ -107,6 +111,8 @@ class ContractMapper:
         Examples:
             >>> ContractMapper.get_product_info('rb2601')
             {'product_code': 'rb', 'is_continuous': False, 'continuous_symbol': 'rb888'}
+            >>> ContractMapper.get_product_info('IF2503')
+            {'product_code': 'if', 'is_continuous': False, 'continuous_symbol': 'IF888'}
         """
         return {
             'product_code': cls.extract_product_code(symbol),

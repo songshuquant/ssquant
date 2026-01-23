@@ -17,6 +17,8 @@ class StrategyAPI:
         self._data = context['data']
         self._log = context['log']
         self._params = context.get('params', {})
+        self._account_info = context.get('account_info', None)  # 账户信息引用
+        self._ctp_client = context.get('ctp_client', None)      # CTP客户端引用
         
     def log(self, message: str):
         """
@@ -577,6 +579,156 @@ class StrategyAPI:
         if ds and hasattr(ds, 'ticks'):
             return len(ds.ticks)
         return 0
+    
+    # ==================== 账户资金查询 ====================
+    
+    def get_account(self) -> dict:
+        """
+        获取完整账户信息（仅实盘/SIMNOW模式有效）
+        
+        Returns:
+            账户信息字典，包含以下字段：
+            - balance: 账户权益
+            - available: 可用资金
+            - position_profit: 持仓盈亏
+            - close_profit: 平仓盈亏
+            - commission: 手续费
+            - frozen_margin: 冻结保证金
+            - curr_margin: 占用保证金
+            - update_time: 更新时间
+            
+        示例:
+            account = api.get_account()
+            print(f"权益: {account['balance']}, 可用: {account['available']}")
+        """
+        if self._account_info:
+            return self._account_info.copy()
+        return {
+            'balance': 0,
+            'available': 0,
+            'position_profit': 0,
+            'close_profit': 0,
+            'commission': 0,
+            'frozen_margin': 0,
+            'curr_margin': 0,
+            'update_time': None,
+        }
+    
+    def get_balance(self) -> float:
+        """
+        获取账户权益（仅实盘/SIMNOW模式有效）
+        
+        Returns:
+            账户权益金额
+        """
+        if self._account_info:
+            return self._account_info.get('balance', 0)
+        return 0
+    
+    def get_available(self) -> float:
+        """
+        获取可用资金（仅实盘/SIMNOW模式有效）
+        
+        Returns:
+            可用资金金额
+        """
+        if self._account_info:
+            return self._account_info.get('available', 0)
+        return 0
+    
+    def get_position_profit(self) -> float:
+        """
+        获取持仓盈亏（仅实盘/SIMNOW模式有效）
+        
+        Returns:
+            持仓浮动盈亏
+        """
+        if self._account_info:
+            return self._account_info.get('position_profit', 0)
+        return 0
+    
+    def get_close_profit(self) -> float:
+        """
+        获取平仓盈亏（仅实盘/SIMNOW模式有效）
+        
+        Returns:
+            当日平仓盈亏
+        """
+        if self._account_info:
+            return self._account_info.get('close_profit', 0)
+        return 0
+    
+    def get_margin(self) -> float:
+        """
+        获取占用保证金（仅实盘/SIMNOW模式有效）
+        
+        Returns:
+            当前占用保证金
+        """
+        if self._account_info:
+            return self._account_info.get('curr_margin', 0)
+        return 0
+    
+    def get_commission(self) -> float:
+        """
+        获取手续费（仅实盘/SIMNOW模式有效）
+        
+        Returns:
+            当日手续费
+        """
+        if self._account_info:
+            return self._account_info.get('commission', 0)
+        return 0
+    
+    def query_account(self):
+        """
+        主动查询账户资金（仅实盘/SIMNOW模式有效）
+        
+        触发CTP账户查询，查询结果通过回调更新到 account_info。
+        建议在查询后等待 0.3-0.5 秒再读取账户信息。
+        
+        注意：
+            - 此方法仅在实盘模式（SIMNOW/REAL_TRADING）下有效
+            - 回测模式下调用此方法无效果
+            - CTP有查询频率限制，建议不要频繁调用
+            
+        示例:
+            api.query_account()
+            import time
+            time.sleep(0.5)  # 等待回调
+            account = api.get_account()
+        """
+        if self._ctp_client and hasattr(self._ctp_client, 'query_account'):
+            self._ctp_client.query_account()
+    
+    def query_position(self, symbol: str = ""):
+        """
+        主动查询持仓（仅实盘/SIMNOW模式有效）
+        
+        Args:
+            symbol: 合约代码，空字符串表示查询所有持仓
+            
+        注意：
+            - 此方法仅在实盘模式（SIMNOW/REAL_TRADING）下有效
+            - 回测模式下调用此方法无效果
+        """
+        if self._ctp_client and hasattr(self._ctp_client, 'query_position'):
+            self._ctp_client.query_position(symbol)
+    
+    def query_trades(self, symbol: str = ""):
+        """
+        主动查询当日成交记录（仅实盘/SIMNOW模式有效）
+        
+        Args:
+            symbol: 合约代码，空字符串表示查询所有成交
+            
+        注意：
+            - 此方法仅在实盘模式（SIMNOW/REAL_TRADING）下有效
+            - 回测模式下调用此方法无效果
+            - 查询结果通过 on_query_trade 回调返回
+        """
+        if self._ctp_client and hasattr(self._ctp_client, 'query_trades'):
+            self._ctp_client.query_trades(symbol)
 
 # 创建策略API工厂函数
 def create_strategy_api(context: Dict) -> StrategyAPI:
