@@ -118,8 +118,8 @@ if __name__ == "__main__":
             retry_limit=3,                 # 撤单后重试3次
             retry_offset_ticks=5,          # 重试时: 对手价 + 5跳 (激进追单)
             
-            # -------- 常规配置 --------
-            price_tick=0.02,
+            # -------- 常规配置（price_tick 自动获取）--------
+            # price_tick=自动,             # 最小变动价位（自动从远程获取）
             order_offset_ticks=0,          # 默认偏移 (限价单模式下此参数被忽略)
             preload_history=False,
             
@@ -140,7 +140,7 @@ if __name__ == "__main__":
             retry_limit=3,
             retry_offset_ticks=5,          # 追单5跳
             
-            price_tick=0.02,
+            # price_tick=自动,             # 最小变动价位（自动从远程获取）
             order_offset_ticks=0,
             preload_history=False,
             

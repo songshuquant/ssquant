@@ -55,8 +55,6 @@ class UnifiedStrategyRunner:
         self.backtester = None
         self.live_runner = None
         
-        # 品牌与免责声明
-        self._print_disclaimer()
         print(f"[统一运行器] 初始化 - 模式: {mode.value}")
     
     def _print_disclaimer(self):
@@ -168,7 +166,10 @@ class UnifiedStrategyRunner:
             on_cancel_error: Optional[Callable] = None,
             on_account: Optional[Callable] = None,
             on_position: Optional[Callable] = None,
-            on_disconnect: Optional[Callable] = None) -> Dict[str, Any]:
+            on_position_complete: Optional[Callable] = None,
+            on_disconnect: Optional[Callable] = None,
+            on_query_trade: Optional[Callable] = None,
+            on_query_trade_complete: Optional[Callable] = None) -> Dict[str, Any]:
         """
         运行策略
         
@@ -185,7 +186,10 @@ class UnifiedStrategyRunner:
             on_cancel_error: 撤单错误回调 - 撤单失败时触发
             on_account: 账户资金回调 - 资金变化时触发
             on_position: 持仓回调 - 持仓变化时触发
+            on_position_complete: 持仓查询完成回调 - 持仓查询完成时触发
             on_disconnect: 断开连接回调 - 与CTP服务器断开时触发
+            on_query_trade: 成交查询回调 - 查询成交记录时触发（单条）
+            on_query_trade_complete: 成交查询完成回调 - 查询成交完成时触发
             
         Returns:
             运行结果字典
@@ -200,7 +204,10 @@ class UnifiedStrategyRunner:
         self.on_cancel_error_callback = on_cancel_error
         self.on_account_callback = on_account
         self.on_position_callback = on_position
+        self.on_position_complete_callback = on_position_complete
         self.on_disconnect_callback = on_disconnect
+        self.on_query_trade_callback = on_query_trade
+        self.on_query_trade_complete_callback = on_query_trade_complete
         
         print(f"\n{'='*80}")
         print(f"运行模式: {self.mode.value}")
@@ -242,6 +249,18 @@ class UnifiedStrategyRunner:
             symbol_periods_map = {}  # {symbol: [period_config_list]}
             symbol_config_map = {}   # {symbol: config}
             
+            # 导入合约参数获取函数和品种代码提取函数
+            from ..data.contract_info import get_trading_params
+            import re
+            
+            def extract_variety_code(symbol: str) -> str:
+                """从合约代码中提取品种代码，如 rb888 -> rb, au2602 -> au"""
+                match = re.match(r'^([a-zA-Z]+)', symbol)
+                return match.group(1).lower() if match else symbol.lower()
+            
+            # 缓存同一品种的参数（用于跨期套利等场景，确保同品种使用相同手续费）
+            variety_params_cache = {}  # {variety_code: auto_params}
+            
             # 第一步：收集所有品种的周期配置
             for ds_config in self.config['data_sources']:
                 symbol = ds_config['symbol']
@@ -251,19 +270,70 @@ class UnifiedStrategyRunner:
                 # 将周期配置添加到对应品种的列表中
                 if symbol not in symbol_periods_map:
                     symbol_periods_map[symbol] = []
-                    # 保存品种的基础配置（使用第一次遇到的配置）
+                    
+                    # 自动获取合约参数（如果用户未手动指定）
+                    auto_params = {}
+                    variety_code = extract_variety_code(symbol)
+                    
+                    if 'contract_multiplier' not in ds_config or 'commission' not in ds_config:
+                        # 优先使用已缓存的同品种参数（确保跨期套利等场景下同品种手续费一致）
+                        if variety_code in variety_params_cache:
+                            auto_params = variety_params_cache[variety_code]
+                            # 打印复用参数信息
+                            comm_per_lot = auto_params.get('commission_per_lot', 0)
+                            if comm_per_lot > 0:
+                                comm_info = f"手续费={comm_per_lot}元/手"
+                            else:
+                                comm_info = f"手续费率={auto_params.get('commission', 0)}"
+                            print(f"[自动参数] {symbol}({auto_params.get('variety_name', '')}) -> "
+                                  f"复用{variety_code}参数: {comm_info}")
+                        else:
+                            # 首次遇到该品种，从 API 获取参数
+                            contract_params = get_trading_params(symbol)
+                            if contract_params:
+                                auto_params = contract_params
+                                # 缓存该品种的参数
+                                variety_params_cache[variety_code] = contract_params
+                                # 打印自动获取的参数
+                                comm_per_lot = contract_params.get('commission_per_lot', 0)
+                                if comm_per_lot > 0:
+                                    comm_info = f"手续费={comm_per_lot}元/手"
+                                else:
+                                    comm_info = f"手续费率={contract_params.get('commission', 0)}"
+                                print(f"[自动参数] {symbol}({contract_params.get('variety_name', '')}) -> "
+                                      f"contract_multiplier={contract_params.get('contract_multiplier')}, "
+                                      f"price_tick={contract_params.get('price_tick')}, "
+                                      f"margin_rate={contract_params.get('margin_rate')}, {comm_info}")
+                    
+                    # 保存品种的基础配置（优先使用用户指定 > 自动获取 > 默认值）
                     symbol_config_map[symbol] = {
                         'start_date': self.config['start_date'],
                         'end_date': self.config['end_date'],
                         'initial_capital': self.config.get('initial_capital', 100000),
-                        'commission': self.config.get('commission', 0.0001),
-                        'margin_rate': self.config.get('margin_rate', 0.1),
-                        'contract_multiplier': ds_config.get('contract_multiplier', 
-                                                              self.config.get('contract_multiplier', 10)),
+                        'commission': ds_config.get('commission',
+                                                    auto_params.get('commission',
+                                                    self.config.get('commission', 0.0001))),
+                        'margin_rate': ds_config.get('margin_rate',
+                                                     auto_params.get('margin_rate',
+                                                     self.config.get('margin_rate', 0.1))),
+                        'contract_multiplier': ds_config.get('contract_multiplier',
+                                                              auto_params.get('contract_multiplier',
+                                                              self.config.get('contract_multiplier', 10))),
                         'slippage_ticks': ds_config.get('slippage_ticks', 
                                                          self.config.get('slippage_ticks', 1)),
-                        'price_tick': ds_config.get('price_tick', 
-                                                     self.config.get('price_tick', 1.0)),
+                        'price_tick': ds_config.get('price_tick',
+                                                     auto_params.get('price_tick',
+                                                     self.config.get('price_tick', 1.0))),
+                        # 固定金额手续费（元/手）
+                        'commission_per_lot': ds_config.get('commission_per_lot',
+                                                             auto_params.get('commission_per_lot',
+                                                             self.config.get('commission_per_lot', 0))),
+                        'commission_close_per_lot': ds_config.get('commission_close_per_lot',
+                                                                   auto_params.get('commission_close_per_lot',
+                                                                   self.config.get('commission_close_per_lot', 0))),
+                        'commission_close_today_per_lot': ds_config.get('commission_close_today_per_lot',
+                                                                         auto_params.get('commission_close_today_per_lot',
+                                                                         self.config.get('commission_close_today_per_lot', 0))),
                     }
                 
                 # 添加周期配置
@@ -291,6 +361,10 @@ class UnifiedStrategyRunner:
                     'contract_multiplier': self.config.get('contract_multiplier', 10),
                     'slippage_ticks': self.config.get('slippage_ticks', 1),
                     'price_tick': self.config.get('price_tick', 1.0),
+                    # 固定金额手续费（元/手）
+                    'commission_per_lot': self.config.get('commission_per_lot', 0),
+                    'commission_close_per_lot': self.config.get('commission_close_per_lot', 0),
+                    'commission_close_today_per_lot': self.config.get('commission_close_today_per_lot', 0),
                     'periods': [
                         {
                             'kline_period': self.config['kline_period'],
@@ -331,7 +405,10 @@ class UnifiedStrategyRunner:
             on_cancel_error_callback=self.on_cancel_error_callback,
             on_account_callback=self.on_account_callback,
             on_position_callback=self.on_position_callback,
-            on_disconnect_callback=self.on_disconnect_callback
+            on_position_complete_callback=self.on_position_complete_callback,
+            on_disconnect_callback=self.on_disconnect_callback,
+            on_query_trade_callback=self.on_query_trade_callback,
+            on_query_trade_complete_callback=self.on_query_trade_complete_callback
         )
         
         # 运行
@@ -361,7 +438,10 @@ class UnifiedStrategyRunner:
             on_cancel_error_callback=self.on_cancel_error_callback,
             on_account_callback=self.on_account_callback,
             on_position_callback=self.on_position_callback,
-            on_disconnect_callback=self.on_disconnect_callback
+            on_position_complete_callback=self.on_position_complete_callback,
+            on_disconnect_callback=self.on_disconnect_callback,
+            on_query_trade_callback=self.on_query_trade_callback,
+            on_query_trade_complete_callback=self.on_query_trade_complete_callback
         )
         
         # 运行

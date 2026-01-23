@@ -133,6 +133,16 @@ class BacktestResultCalculator:
             contract_multiplier = symbol_config.get('contract_multiplier', 10)
             initial_capital = symbol_config.get('initial_capital', 100000.0)
             
+            # 获取固定金额手续费（元/手）
+            commission_per_lot = symbol_config.get('commission_per_lot', 0)
+            commission_close_per_lot = symbol_config.get('commission_close_per_lot', 0)
+            commission_close_today_per_lot = symbol_config.get('commission_close_today_per_lot', 0)
+            
+            # 判断手续费计算方式：
+            # - 如果费率 > 1e-05（有意义的费率），则使用费率计算（如螺纹钢 0.000101）
+            # - 如果费率 ≈ 1e-06（无意义占位符）且固定金额 > 0，则使用固定金额（如黄金 10元/手）
+            use_fixed_commission = commission_rate < 1e-05 and commission_per_lot > 0.1
+            
             # 计算交易统计
             total_trades = len(trades) // 2  # 修改为开平仓一组算一次交易
             
@@ -154,12 +164,23 @@ class BacktestResultCalculator:
                     # 计算金额盈亏（考虑合约乘数）
                     amount_profit = points_profit * volume * contract_multiplier
                     
-                    # 计算手续费
-                    open_commission = open_price * volume * contract_multiplier * commission_rate
-                    close_commission = close_price * volume * contract_multiplier * commission_rate
+                    # 计算手续费（支持固定金额和费率两种方式）
+                    if use_fixed_commission:
+                        # 固定金额：元/手 × 手数
+                        open_commission = commission_per_lot * volume
+                        close_commission = commission_close_per_lot * volume
+                    else:
+                        # 费率：成交金额 × 费率
+                        open_commission = open_price * volume * contract_multiplier * commission_rate
+                        close_commission = close_price * volume * contract_multiplier * commission_rate
                     total_commission = open_commission + close_commission
                     
-                    # 计算净盈亏（扣除手续费）
+                    # 计算滑点成本（单位滑点 × 手数 × 合约乘数）
+                    open_slippage = trade.get('slippage_cost', 0) * volume * contract_multiplier
+                    close_slippage = trades[j+1].get('slippage_cost', 0) * volume * contract_multiplier
+                    total_slippage = open_slippage + close_slippage
+                    
+                    # 计算净盈亏（扣除手续费，滑点已在成交价格中体现）
                     net_profit = amount_profit - total_commission
                     
                     # 计算保证金占用
@@ -172,11 +193,13 @@ class BacktestResultCalculator:
                     trades[j]['points_profit'] = 0  # 开仓时点数盈亏为0
                     trades[j]['amount_profit'] = 0  # 开仓时金额盈亏为0
                     trades[j]['commission'] = open_commission  # 开仓手续费
+                    trades[j]['slippage'] = open_slippage  # 开仓滑点成本
                     trades[j]['margin'] = margin  # 保证金占用
                     
                     trades[j+1]['points_profit'] = points_profit  # 平仓时记录点数盈亏
                     trades[j+1]['amount_profit'] = amount_profit  # 平仓时记录金额盈亏
                     trades[j+1]['commission'] = close_commission  # 平仓手续费
+                    trades[j+1]['slippage'] = close_slippage  # 平仓滑点成本
                     trades[j+1]['net_profit'] = net_profit  # 净盈亏
                     trades[j+1]['roi'] = roi  # 收益率
                     trades[j+1]['profit'] = net_profit  # 兼容旧代码
@@ -188,7 +211,10 @@ class BacktestResultCalculator:
                     # 计算开仓手续费
                     last_price = last_trade['price']
                     last_volume = last_trade['volume']
-                    last_commission = last_price * last_volume * contract_multiplier * commission_rate
+                    if use_fixed_commission:
+                        last_commission = commission_per_lot * last_volume
+                    else:
+                        last_commission = last_price * last_volume * contract_multiplier * commission_rate
                     # 设置手续费
                     last_trade['commission'] = last_commission
                     # 设置其他字段为默认值
@@ -206,6 +232,7 @@ class BacktestResultCalculator:
             total_points_profit = sum(t.get('points_profit', 0) for t in trades)
             total_amount_profit = sum(t.get('amount_profit', 0) for t in trades)
             total_commission = sum(t.get('commission', 0) for t in trades)
+            total_slippage = sum(t.get('slippage', 0) for t in trades)  # 总滑点成本
             total_net_profit = sum(t.get('net_profit', 0) for t in trades)
             
             # 计算平均盈亏
@@ -223,10 +250,14 @@ class BacktestResultCalculator:
                 profit_factor = float('inf') if avg_win > 0 else 0
             
             # 修改权益曲线计算方法，考虑持仓盈亏
-            equity_curve = pd.Series(float(initial_capital), index=ds.data.index, dtype=float)
+            equity_curve = pd.Series(float(initial_capital), index=ds.data.index, dtype=float)  # 净利润曲线（扣除所有成本）
+            gross_equity_curve = pd.Series(float(initial_capital), index=ds.data.index, dtype=float)  # 毛利润曲线（完全不扣除成本）
             available_cash = initial_capital  # 可用资金（未被占用的资金）
             total_margin = 0  # 总保证金占用
             total_equity = initial_capital  # 总权益（可用资金 + 保证金 + 浮动盈亏）
+            # 累计成本追踪（用于计算毛利润曲线）
+            cumulative_commission = 0  # 累计手续费
+            cumulative_slippage = 0  # 累计滑点成本
             
             # 持仓管理
             long_pos = 0  # 多头持仓量
@@ -263,9 +294,14 @@ class BacktestResultCalculator:
                         margin_required = position_cost * margin_rate
                         commission = trade.get('commission', 0)
                         
-                        # 更新资金
+                        # 更新资金（净利润：扣除手续费）
                         available_cash -= (margin_required + commission)
                         total_margin += margin_required
+                        
+                        # 累计成本
+                        cumulative_commission += commission
+                        slippage_cost = trade.get('slippage', 0)
+                        cumulative_slippage += slippage_cost
                         
                         # 更新多头持仓和平均价格
                         if long_pos > 0:
@@ -291,9 +327,14 @@ class BacktestResultCalculator:
                         # 计算平仓盈亏
                         close_profit = (price - long_avg_price) * volume * contract_multiplier
                         
-                        # 更新资金
+                        # 更新资金（净利润：扣除手续费）
                         available_cash += (margin_released + close_profit - commission)
                         total_margin -= margin_released
+                        
+                        # 累计成本
+                        cumulative_commission += commission
+                        slippage_cost = trade.get('slippage', 0)
+                        cumulative_slippage += slippage_cost
                         
                         # 更新多头持仓
                         long_pos -= volume
@@ -310,9 +351,14 @@ class BacktestResultCalculator:
                         margin_required = position_cost * margin_rate
                         commission = trade.get('commission', 0)
                         
-                        # 更新资金（空头开仓不增加现金，只收取保证金和手续费）
+                        # 更新资金（净利润：扣除手续费）
                         available_cash -= (margin_required + commission)
                         total_margin += margin_required
+                        
+                        # 累计成本
+                        cumulative_commission += commission
+                        slippage_cost = trade.get('slippage', 0)
+                        cumulative_slippage += slippage_cost
                         
                         # 更新空头持仓和平均价格
                         if short_pos > 0:
@@ -338,9 +384,14 @@ class BacktestResultCalculator:
                         # 计算平仓盈亏
                         close_profit = (short_avg_price - price) * volume * contract_multiplier
                         
-                        # 更新资金
+                        # 更新资金（净利润：扣除手续费）
                         available_cash += (margin_released + close_profit - commission)
                         total_margin -= margin_released
+                        
+                        # 累计成本
+                        cumulative_commission += commission
+                        slippage_cost = trade.get('slippage', 0)
+                        cumulative_slippage += slippage_cost
                         
                         # 更新空头持仓
                         short_pos -= volume
@@ -370,19 +421,31 @@ class BacktestResultCalculator:
                 # 计算总浮动盈亏
                 total_floating_pnl = long_floating_pnl + short_floating_pnl
                 
-                # 计算当前总权益
+                # 计算当前总权益（净利润：已扣除成本）
                 total_equity = available_cash + total_margin + total_floating_pnl
+                
+                # 计算毛利润总权益（完全不扣除成本：净权益 + 累计手续费 + 累计滑点）
+                gross_total_equity = total_equity + cumulative_commission + cumulative_slippage
                 
                 # 更新权益曲线
                 equity_curve[date] = total_equity
+                gross_equity_curve[date] = gross_total_equity
             
             # 计算期末权益和净值
             final_equity = equity_curve.iloc[-1] if not equity_curve.empty else initial_capital
+            gross_final_equity = gross_equity_curve.iloc[-1] if not gross_equity_curve.empty else initial_capital
             
             # 确保期末权益不小于0.01（为了避免负净值）
             final_equity = max(0.01, final_equity)
+            gross_final_equity = max(0.01, gross_final_equity)
             
             net_value = final_equity / initial_capital
+            
+            # 重新计算利润指标，确保与权益曲线一致
+            # 净利润 = 期末权益 - 初始资金（基于 equity_curve，已扣除手续费和滑点）
+            total_net_profit = final_equity - initial_capital
+            # 毛利润 = 净利润 + 手续费 + 滑点（完全不含任何成本的原始盈亏）
+            total_amount_profit = total_net_profit + total_commission + total_slippage
             
             # 计算最大回撤（使用修改后的权益曲线）
             if not equity_curve.empty and equity_curve.max() > 0:
@@ -397,25 +460,42 @@ class BacktestResultCalculator:
                 max_drawdown = 0
                 max_drawdown_pct = 0
             
-            # 计算年化收益率（假设一年250个交易日）
-            if not ds.data.empty:
-                trading_days = (ds.data.index[-1] - ds.data.index[0]).days / 365
-                if trading_days > 0:
-                    annual_return = (total_net_profit / initial_capital) / trading_days * 100
-                else:
-                    annual_return = 0
-            else:
-                annual_return = 0
+            # 计算年化收益率和夏普比率
+            # 先将权益曲线按日聚合，避免不同K线周期导致的计算偏差
+            annual_return = 0
+            sharpe_ratio = 0
             
-            # 计算夏普比率（假设无风险利率为3%）
-            if not equity_curve.empty:
-                daily_returns = equity_curve.diff().fillna(0)
-                if daily_returns.std() > 0:
-                    sharpe_ratio = (daily_returns.mean() - 0.03/250) / daily_returns.std() * np.sqrt(250)
+            if not equity_curve.empty and len(equity_curve) > 1:
+                # 将权益曲线按日聚合（取每日最后一个值）
+                equity_with_date = pd.Series(equity_curve.values, index=ds.data.index[:len(equity_curve)])
+                daily_equity = equity_with_date.resample('D').last().dropna()
+                
+                if len(daily_equity) > 1:
+                    # 计算日收益率（百分比形式）
+                    daily_returns = daily_equity.pct_change().dropna()
+                    
+                    # 计算实际交易天数
+                    actual_trading_days = len(daily_equity)
+                    
+                    # 年化收益率：(期末/期初)^(250/交易天数) - 1
+                    if actual_trading_days > 0 and daily_equity.iloc[0] > 0:
+                        total_return = (daily_equity.iloc[-1] / daily_equity.iloc[0]) - 1
+                        # 简单年化：总收益率 / 年数
+                        years = actual_trading_days / 250
+                        if years > 0:
+                            annual_return = (total_return / years) * 100
+                    
+                    # 夏普比率：(日收益率均值 - 无风险日利率) / 日收益率标准差 * √250
+                    # 假设无风险年利率为3%
+                    risk_free_daily = 0.03 / 250
+                    
+                    if len(daily_returns) > 0 and daily_returns.std() > 0:
+                        excess_return = daily_returns.mean() - risk_free_daily
+                        sharpe_ratio = excess_return / daily_returns.std() * np.sqrt(250)
                 else:
+                    # 只有一天数据，无法计算
+                    annual_return = 0
                     sharpe_ratio = 0
-            else:
-                sharpe_ratio = 0
             
             # 保存结果
             ds_results = {
@@ -430,6 +510,7 @@ class BacktestResultCalculator:
                 'total_points_profit': total_points_profit,
                 'total_amount_profit': total_amount_profit,
                 'total_commission': total_commission,
+                'total_slippage': total_slippage,  # 总滑点成本
                 'total_net_profit': total_net_profit,
                 'avg_win': avg_win,
                 'avg_loss': avg_loss,
@@ -443,7 +524,8 @@ class BacktestResultCalculator:
                 'sharpe_ratio': sharpe_ratio,
                 'trades': trades,
                 'data': ds.data,
-                'equity_curve': equity_curve
+                'equity_curve': equity_curve,
+                'gross_equity_curve': gross_equity_curve  # 毛利润曲线（不扣除成本）
             }
             
             # 添加到结果字典
@@ -459,9 +541,10 @@ class BacktestResultCalculator:
             self.log(f"期末权益: {final_equity:.2f}")
             self.log(f"净值: {net_value:.4f}")
             self.log(f"总点数盈亏: {total_points_profit:.2f}")
-            self.log(f"总金额盈亏: {total_amount_profit:.2f}")
+            self.log(f"毛利润(不含成本): {total_amount_profit:.2f}")
             self.log(f"总手续费: {total_commission:.2f}")
-            self.log(f"总净盈亏: {total_net_profit:.2f}")
+            self.log(f"总滑点成本: {total_slippage:.2f}")
+            self.log(f"净利润(扣除成本): {total_net_profit:.2f}")
             self.log(f"平均盈利: {avg_win:.2f}")
             self.log(f"平均亏损: {avg_loss:.2f}")
             self.log(f"盈亏比: {profit_factor:.2f}")

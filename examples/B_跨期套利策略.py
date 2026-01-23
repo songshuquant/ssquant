@@ -14,6 +14,13 @@
 - 同品种不同月份合约，对冲比率为1:1
 - 价差具有均值回归特性
 - 风险相对较低
+
+合约参数自动获取说明:
+-----------------------
+回测配置中的 data_sources 已启用自动参数获取。
+SIMNOW/实盘的 data_sources 中如需手动指定参数，请取消注释:
+    'price_tick': 1,              # 手动指定最小变动价位
+    'contract_multiplier': 10,    # 手动指定合约乘数
 """
 from ssquant.api.strategy_api import StrategyAPI
 from ssquant.backtest.unified_runner import UnifiedStrategyRunner, RunMode
@@ -195,8 +202,8 @@ if __name__ == "__main__":
             start_date='2025-12-01',          # 回测开始日期
             end_date='2026-01-31',            # 回测结束日期
             initial_capital=100000,           # 初始资金 (元)
-            commission=0.0001,                # 手续费率 (万分之一)
-            margin_rate=0.1,                  # 保证金率 (10%)
+            # commission=自动,                # 手续费率（自动从远程获取）
+            # margin_rate=自动,               # 保证金率（自动从远程获取）
             
             # -------- 数据对齐配置 (套利策略必须开启) --------
             align_data=True,                  # 是否对齐多数据源的时间索引
@@ -207,21 +214,22 @@ if __name__ == "__main__":
             
             # -------- 跨期套利数据源配置 (同品种不同月份) --------
             # 888=主力连续, 777=次主力连续
+            # 注：data_sources 中的 price_tick/contract_multiplier 自动获取
             data_sources=[
                 {   # 数据源0: 近月合约 (主力连续)
                     'symbol': 'rb888',        # 合约代码 (888=主力连续)
                     'kline_period': '1m',     # K线周期
                     'adjust_type': '1',       # 复权类型: '0'不复权, '1'后复权
-                    'price_tick': 1,          # 最小变动价位 (元)
-                    'contract_multiplier': 10,# 合约乘数 (吨/手)
+                    # 'price_tick': 自动,     # 最小变动价位（自动获取）
+                    # 'contract_multiplier': 自动,  # 合约乘数（自动获取）
                     'slippage_ticks': 1,      # 滑点跳数
                 },
                 {   # 数据源1: 远月合约 (次主力连续)
                     'symbol': 'rb777',        # 合约代码 (777=次主力连续)
                     'kline_period': '1m',     # K线周期
                     'adjust_type': '1',       # 复权类型
-                    'price_tick': 1,          # 最小变动价位
-                    'contract_multiplier': 10,# 合约乘数
+                    # 'price_tick': 自动,     # 最小变动价位（自动获取）
+                    # 'contract_multiplier': 自动,  # 合约乘数（自动获取）
                     'slippage_ticks': 1,      # 滑点跳数
                 },
             ]
@@ -237,11 +245,12 @@ if __name__ == "__main__":
             # -------- 跨期套利配置 --------
             # ⭐ 关键：使用 history_symbol 指定历史数据来源
             # 近月用主力数据(rb888)，远月用次主力数据(rb777)
+            # 注：price_tick 自动获取，如需手动指定请取消注释
             data_sources=[
                 {   # 数据源0: 近月合约（主力）
                     'symbol': 'rb2601',           # 合约代码 (近月合约)
                     'kline_period': '1m',         # K线周期
-                    'price_tick': 1,              # 最小变动价位 (元)
+                    # 'price_tick': 1,            # 最小变动价位（自动获取，手动指定请取消注释）
                     'order_offset_ticks': 5,      # 下单偏移跳数 (挂单距离)
                     
                     'algo_trading': False,        # 智能交易开关
@@ -257,7 +266,7 @@ if __name__ == "__main__":
                 {   # 数据源1: 远月合约（次主力）
                     'symbol': 'rb2605',           # 合约代码 (远月合约)
                     'kline_period': '1m',         # K线周期
-                    'price_tick': 1,              # 最小变动价位
+                    # 'price_tick': 1,            # 最小变动价位（自动获取，手动指定请取消注释）
                     'order_offset_ticks': 5,      # 下单偏移跳数
                     
                     'algo_trading': False,        # 智能交易开关
@@ -293,11 +302,12 @@ if __name__ == "__main__":
             
             # -------- 跨期套利配置 --------
             # ⭐ 关键：使用 history_symbol 指定历史数据来源
+            # 注：price_tick 自动获取，如需手动指定请取消注释
             data_sources=[
                 {   # 数据源0: 近月合约（主力）
                     'symbol': 'rb2601',           # 合约代码 (近月合约)
                     'kline_period': '1m',         # K线周期
-                    'price_tick': 1,              # 最小变动价位 (元)
+                    # 'price_tick': 1,            # 最小变动价位（自动获取，手动指定请取消注释）
                     'order_offset_ticks': 5,      # 下单偏移跳数 (挂单距离)
                     
                     'algo_trading': False,        # 智能交易开关
@@ -313,7 +323,7 @@ if __name__ == "__main__":
                 {   # 数据源1: 远月合约（次主力）
                     'symbol': 'rb2605',           # 合约代码 (远月合约)
                     'kline_period': '1m',         # K线周期
-                    'price_tick': 1,              # 最小变动价位
+                    # 'price_tick': 1,            # 最小变动价位（自动获取，手动指定请取消注释）
                     'order_offset_ticks': 5,      # 下单偏移跳数
                     
                     'algo_trading': False,        # 智能交易开关

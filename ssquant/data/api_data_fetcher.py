@@ -6,6 +6,173 @@ import os
 import time
 import sqlite3
 import functools
+import threading
+
+# 数据库写入锁 - 确保对同一个数据库文件的写入是串行的
+_db_write_locks = {}  # {db_path: threading.Lock()}
+_db_locks_lock = threading.Lock()  # 用于保护 _db_write_locks 字典的锁
+
+def _get_db_lock(db_path: str) -> threading.Lock:
+    """获取指定数据库文件的写入锁（线程安全）"""
+    abs_path = os.path.abspath(db_path)
+    if abs_path not in _db_write_locks:
+        with _db_locks_lock:
+            if abs_path not in _db_write_locks:
+                _db_write_locks[abs_path] = threading.Lock()
+    return _db_write_locks[abs_path]
+
+def _insert_dataframe(cursor, table_name: str, df) -> int:
+    """使用原生SQL INSERT插入DataFrame数据（避免pandas to_sql的问题）"""
+    if df is None or df.empty:
+        return 0
+    
+    columns = df.columns.tolist()
+    placeholders = ', '.join(['?' for _ in columns])
+    col_names = ', '.join([f'"{col}"' for col in columns])
+    insert_sql = f'INSERT INTO "{table_name}" ({col_names}) VALUES ({placeholders})'
+    
+    # 将DataFrame转换为元组列表
+    rows = [tuple(row) for row in df.values]
+    
+    # 批量插入
+    cursor.executemany(insert_sql, rows)
+    return len(rows)
+
+def append_kline_fast(data, db_path: str, table_name: str) -> int:
+    """
+    快速追加K线数据（不做去重检查，适用于实时K线）
+    
+    与 append_to_sqlite 的区别：
+    - 不读取整个表进行去重（大幅提升性能）
+    - 使用 INSERT OR IGNORE 避免重复插入
+    - 适用于datetime唯一的实时K线数据
+    
+    Args:
+        data: 要追加的数据（DataFrame或Dict）
+        db_path: 数据库路径
+        table_name: 表名
+        
+    Returns:
+        int: 实际新增的记录数
+    """
+    if data is None:
+        return 0
+    
+    # 转换为DataFrame
+    if isinstance(data, dict):
+        df = pd.DataFrame([data])
+    else:
+        df = data
+    
+    if df.empty:
+        return 0
+    
+    # 确保目录存在
+    db_dir = os.path.dirname(db_path)
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
+    
+    # 处理datetime列
+    if 'datetime' in df.columns:
+        df = df.copy()
+        df['datetime'] = pd.to_datetime(df['datetime'], errors='coerce')
+        if hasattr(df['datetime'].dtype, 'tz') and df['datetime'].dt.tz is not None:
+            df['datetime'] = df['datetime'].dt.tz_localize(None)
+        df['datetime'] = df['datetime'].dt.strftime('%Y-%m-%d %H:%M:%S').fillna('')
+    
+    # 将inf替换为None
+    df = df.replace([float('inf'), float('-inf')], None)
+    
+    # 获取数据库锁
+    db_lock = _get_db_lock(db_path)
+    new_records = 0
+    
+    with db_lock:
+        conn = None
+        try:
+            abs_db_path = os.path.abspath(db_path)
+            # 设置超时30秒，避免锁等待失败
+            conn = sqlite3.connect(abs_db_path, timeout=30)
+            cursor = conn.cursor()
+            # 使用DELETE模式，写入更直接（避免WAL的延迟问题）
+            cursor.execute("PRAGMA journal_mode=WAL")  # WAL模式：支持并发读写
+            
+            # 检查表是否存在，不存在则创建
+            cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}'")
+            table_exists = cursor.fetchone() is not None
+            
+            if not table_exists:
+                # 创建表
+                columns_def = []
+                for col in df.columns:
+                    dtype = df[col].dtype
+                    if dtype == 'object' or col == 'datetime':
+                        sql_type = 'TEXT'
+                    elif 'float' in str(dtype):
+                        sql_type = 'REAL'
+                    elif 'int' in str(dtype):
+                        sql_type = 'INTEGER'
+                    else:
+                        sql_type = 'TEXT'
+                    columns_def.append(f'"{col}" {sql_type}')
+                
+                create_sql = f'CREATE TABLE IF NOT EXISTS "{table_name}" ({", ".join(columns_def)})'
+                cursor.execute(create_sql)
+                
+                # 为datetime列创建唯一索引（避免重复插入）
+                if 'datetime' in df.columns:
+                    try:
+                        cursor.execute(f'CREATE UNIQUE INDEX IF NOT EXISTS "idx_{table_name}_datetime" ON "{table_name}" ("datetime")')
+                    except:
+                        pass
+                conn.commit()
+            else:
+                # 表已存在，检查并添加缺少的列
+                cursor.execute(f'PRAGMA table_info("{table_name}")')
+                existing_cols = set(row[1] for row in cursor.fetchall())
+                
+                for col in df.columns:
+                    if col not in existing_cols:
+                        # 确定列类型
+                        dtype = df[col].dtype
+                        if dtype == 'object' or col == 'datetime':
+                            sql_type = 'TEXT'
+                        elif 'float' in str(dtype):
+                            sql_type = 'REAL'
+                        elif 'int' in str(dtype):
+                            sql_type = 'INTEGER'
+                        else:
+                            sql_type = 'TEXT'
+                        
+                        # 添加缺少的列
+                        try:
+                            cursor.execute(f'ALTER TABLE "{table_name}" ADD COLUMN "{col}" {sql_type}')
+                            # print(f"[DB] 表 {table_name} 添加新列: {col}")
+                        except Exception:
+                            pass  # 列可能已存在（并发情况）
+                
+                conn.commit()
+            
+            # 使用 INSERT OR IGNORE 直接插入（如果datetime重复则忽略）
+            columns = df.columns.tolist()
+            placeholders = ', '.join(['?' for _ in columns])
+            col_names = ', '.join([f'"{col}"' for col in columns])
+            insert_sql = f'INSERT OR IGNORE INTO "{table_name}" ({col_names}) VALUES ({placeholders})'
+            
+            rows = [tuple(row) for row in df.values]
+            cursor.executemany(insert_sql, rows)
+            new_records = cursor.rowcount
+            conn.commit()
+            
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            raise
+        finally:
+            if conn:
+                conn.close()
+    
+    return new_records
 
 # 交易日历功能
 try:
@@ -155,6 +322,53 @@ class TradingCalendar:
         
         # 返回第一个和最后一个交易日
         return trading_days[0].strftime('%Y-%m-%d'), trading_days[-1].strftime('%Y-%m-%d')
+    
+    def get_prev_trading_day(self, trading_day):
+        """
+        根据交易日获取上一个交易日（即夜盘实际发生的自然日）
+        
+        用于处理 CTP 的 TradingDay：
+        - 周五夜盘 21:00，TradingDay 是周一，上一个交易日是周五
+        - 节假日前夜盘，TradingDay 是节后第一个交易日，上一个交易日是节前最后一个交易日
+        
+        Args:
+            trading_day: 交易日，可以是字符串(YYYYMMDD或YYYY-MM-DD)、datetime对象
+        
+        Returns:
+            str: 上一个交易日，格式 YYYY-MM-DD；如果找不到返回 None
+        """
+        # 统一日期格式
+        if isinstance(trading_day, str):
+            # 支持 YYYYMMDD 和 YYYY-MM-DD 两种格式
+            if len(trading_day) == 8 and '-' not in trading_day:
+                trading_day = f"{trading_day[:4]}-{trading_day[4:6]}-{trading_day[6:]}"
+            target_date = pd.to_datetime(trading_day)
+        else:
+            target_date = pd.to_datetime(trading_day)
+        
+        target_str = target_date.strftime('%Y-%m-%d')
+        
+        # 如果有交易日历数据，从中查找
+        if self.trading_days and len(self.trading_days) > 0:
+            try:
+                # 找到 trading_day 在列表中的位置
+                if target_str in self.trading_days:
+                    idx = self.trading_days.index(target_str)
+                    if idx > 0:
+                        return self.trading_days[idx - 1]
+                else:
+                    # trading_day 不在列表中，找小于它的最大交易日
+                    prev_days = [d for d in self.trading_days if d < target_str]
+                    if prev_days:
+                        return prev_days[-1]
+            except Exception:
+                pass
+        
+        # 回退方案：简单减一天（只跳过周末）
+        prev_date = target_date - timedelta(days=1)
+        while prev_date.weekday() >= 5:  # 跳过周末
+            prev_date -= timedelta(days=1)
+        return prev_date.strftime('%Y-%m-%d')
 
 # 创建全局交易日历对象
 trading_calendar = TradingCalendar()
@@ -167,6 +381,10 @@ def is_trading_day(date):
 def get_trading_date_range(start_date, end_date):
     """获取实际的交易日期范围"""
     return trading_calendar.get_trading_date_range(start_date, end_date)
+
+def get_prev_trading_day(trading_day):
+    """根据交易日获取上一个交易日"""
+    return trading_calendar.get_prev_trading_day(trading_day)
 
 def get_futures_data(
     symbol, 
@@ -200,6 +418,18 @@ def get_futures_data(
     Returns:
         pd.DataFrame: 包含OHLCV数据的DataFrame
     """
+    # ========== 远程后复权开关控制 ==========
+    # 根据 trading_config.py 的 ENABLE_REMOTE_ADJUST 配置决定是否允许后复权
+    # 服务器升级期间设为 False，恢复后改为 True 即可
+    try:
+        from ..config.trading_config import ENABLE_REMOTE_ADJUST
+    except ImportError:
+        ENABLE_REMOTE_ADJUST = False  # 导入失败时默认禁用
+    
+    if not ENABLE_REMOTE_ADJUST and adjust_type != '0':
+        print(f"[注意] 远程服务器升级中暂不支持后复权，adjust_type 已从 '{adjust_type}' 强制改为 '0'")
+        adjust_type = '0'
+    
     # ========== TICK数据特殊处理 ==========
     # TICK数据只能从本地数据库获取（远程服务器不提供TICK数据）
     # TICK数据没有复权概念，表名格式: {symbol}_tick
@@ -222,7 +452,7 @@ def get_futures_data(
             if data is None or data.empty:
                 print(f"❌ TICK表为空或不存在: {table_name}")
                 # 列出可用的tick表（sqlite3已在顶层导入）
-                conn = sqlite3.connect(db_path)
+                conn = sqlite3.connect(db_path, timeout=30)
                 cursor = conn.cursor()
                 cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%_tick'")
                 available = [row[0] for row in cursor.fetchall()]
@@ -300,7 +530,10 @@ def get_futures_data(
         start_date = trading_start
         end_date = trading_end
         start_dt = pd.to_datetime(start_date)
-        end_dt = pd.to_datetime(end_date)
+    
+    # 注意：end_dt 需要包含当天全天的数据，所以设置为当天 23:59:59
+    # 这一步必须在 if 分支外执行，否则单日请求（如22日到22日）时 end_dt 仍为 00:00:00
+    end_dt = pd.to_datetime(end_date) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
     
     # 检查缓存
     if use_cache:
@@ -626,6 +859,15 @@ def get_futures_data(
 
 def fetch_data_from_api(symbol, start_date, end_date, username, password, kline_period, adjust_type, depth, max_retries=3):
     """从API获取数据的辅助函数"""
+    # 检查是否启用云端数据
+    try:
+        from ..config.trading_config import ENABLE_CLOUD_DATA
+        if not ENABLE_CLOUD_DATA:
+            print(f"⚠️ 云端数据已关闭 (ENABLE_CLOUD_DATA=False)，跳过API请求")
+            return pd.DataFrame()
+    except ImportError:
+        pass  # 配置不存在时默认启用
+    
     # 检查日期是否为交易日
     trading_start, trading_end = get_trading_date_range(start_date, end_date)
     
@@ -639,12 +881,17 @@ def fetch_data_from_api(symbol, start_date, end_date, username, password, kline_
         start_date = trading_start
         end_date = trading_end
     
-    # 检查开始日期和结束日期是否相同（单日请求），如果是，尝试扩展结束日期
+    # 检查开始日期和结束日期是否相同（单日请求），如果是，扩展请求范围
     if start_date == end_date:
         print(f"检测到单日请求：{start_date}，尝试扩展请求范围以适配API")
-        # 将结束日期后推一天
-        end_dt = pd.to_datetime(end_date) + pd.Timedelta(days=1)
-        # 找到下一个交易日
+        
+        # 向前扩展：获取前一个自然日（包含夜盘数据）
+        # 中国期货市场：1月22日的交易日数据包含1月21日21:00后的夜盘
+        prev_natural_day = (pd.to_datetime(start_date) - pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+        print(f"扩展开始日期至前一天（包含夜盘）: {prev_natural_day} 到 {end_date}")
+        start_date = prev_natural_day
+        
+        # 向后扩展：尝试获取下一个交易日（适配某些API要求）
         next_trading_day = None
         for i in range(1, 10):  # 最多尝试往后找10天
             check_date = pd.to_datetime(end_date) + pd.Timedelta(days=i)
@@ -653,7 +900,7 @@ def fetch_data_from_api(symbol, start_date, end_date, username, password, kline_
                 break
         
         if next_trading_day:
-            print(f"扩展请求范围至下一个交易日: {start_date} 到 {next_trading_day}")
+            print(f"扩展结束日期至下一个交易日: {start_date} 到 {next_trading_day}")
             end_date = next_trading_day
     
     # 检查结束日期是否超过当前日期
@@ -665,6 +912,16 @@ def fetch_data_from_api(symbol, start_date, end_date, username, password, kline_
     
     # API配置
     base_url = 'http://kanpan789.com:8086/ftdata'
+    
+    # 远程后复权开关控制（双重保险，已在 get_futures_data 入口处统一处理）
+    # 配置说明见: ssquant/config/trading_config.py 的 ENABLE_REMOTE_ADJUST
+    try:
+        from ..config.trading_config import ENABLE_REMOTE_ADJUST
+    except ImportError:
+        ENABLE_REMOTE_ADJUST = False
+    
+    if not ENABLE_REMOTE_ADJUST:
+        adjust_type = '0'
     
     # 构建请求参数
     params = {
@@ -727,8 +984,9 @@ def fetch_data_from_api(symbol, start_date, end_date, username, password, kline_
                         data['datetime'] = data['datetime'] - pd.Timedelta(hours=hours)
                     
                     # 转换请求的日期范围为datetime对象进行过滤
+                    # 注意：end_date 需要包含当天全天的数据，所以加上 23:59:59
                     start_dt = pd.to_datetime(start_date)
-                    end_dt = pd.to_datetime(end_date)
+                    end_dt = pd.to_datetime(end_date) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
                     
                     # 检查API返回的数据范围
                     original_data_len = len(data)
@@ -823,7 +1081,7 @@ def get_cache_db_and_table(symbol, kline_period, cache_dir, adjust_type):
     return db_path, table_name
 
 def save_to_sqlite(data, db_path, table_name):
-    """保存数据到SQLite数据库"""
+    """保存数据到SQLite数据库（使用数据库锁保证线程安全）"""
     # 确保目录存在（处理空目录的情况）
     db_dir = os.path.dirname(db_path)
     if db_dir:
@@ -847,51 +1105,101 @@ def save_to_sqlite(data, db_path, table_name):
     # 将所有inf和-inf替换为None
     data_copy = data_copy.replace([float('inf'), float('-inf')], None)
     
-    # 使用事务保证数据一致性
-    conn = None
-    success = False
-    try:
-        # 使用绝对路径
-        abs_db_path = os.path.abspath(db_path)
-        conn = sqlite3.connect(abs_db_path)
-        
-        # 关闭自动提交模式
-        conn.isolation_level = 'DEFERRED'
-        
-        # 先判断表是否存在，如果存在则删除
-        cursor = conn.cursor()
-        cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}'")
-        if cursor.fetchone():
-            cursor.execute(f"DROP TABLE IF EXISTS {table_name}")
-        
-        # 将数据保存到新表
-        data_copy.to_sql(table_name, conn, if_exists='replace', index=False)
-        
-        # 显式提交事务
-        conn.commit()
-        success = True
-        print(f"成功保存 {len(data_copy)} 条记录到 {table_name}")
-    except Exception as e:
-        # 出错时回滚
-        if conn is not None and not success:
-            try:
-                conn.rollback()
-            except sqlite3.OperationalError as rollback_error:
-                print(f"回滚事务出错: {rollback_error}")
-        print(f"保存数据到SQLite出错: {e}")
-        import traceback
-        traceback.print_exc()
-    finally:
-        # 确保连接关闭
-        if conn is not None:
-            conn.close()
+    # 获取数据库写入锁（确保同一数据库的写入是串行的）
+    db_lock = _get_db_lock(db_path)
+    
+    with db_lock:  # 加锁
+        conn = None
+        success = False
+        try:
+            # 使用绝对路径
+            abs_db_path = os.path.abspath(db_path)
+            conn = sqlite3.connect(abs_db_path, timeout=30)
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")  # WAL模式：支持并发读写
+            
+            if not data_copy.empty:
+                # 检查表是否存在（大小写不敏感）
+                cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND LOWER(name)=LOWER('{table_name}')")
+                result = cursor.fetchone()
+                
+                if result:
+                    # 表存在：使用实际表名
+                    actual_table_name = result[0]
+                    table_name = actual_table_name  # 使用实际表名
+                    
+                    # 检查并自动添加缺失的列
+                    cursor.execute(f'PRAGMA table_info("{table_name}")')
+                    existing_columns = {row[1].lower() for row in cursor.fetchall()}
+                    
+                    for col in data_copy.columns:
+                        if col.lower() not in existing_columns:
+                            # 根据数据类型确定SQL类型
+                            dtype = data_copy[col].dtype
+                            if pd.api.types.is_integer_dtype(dtype):
+                                sql_type = 'INTEGER'
+                            elif pd.api.types.is_float_dtype(dtype):
+                                sql_type = 'REAL'
+                            else:
+                                sql_type = 'TEXT'
+                            
+                            # 添加新列
+                            alter_sql = f'ALTER TABLE "{table_name}" ADD COLUMN "{col}" {sql_type}'
+                            cursor.execute(alter_sql)
+                            print(f"[自动添加列] {table_name}.{col} ({sql_type})")
+                    
+                    # 清空数据后插入
+                    cursor.execute(f'DELETE FROM "{actual_table_name}"')
+                else:
+                    # 表不存在：创建新表
+                    columns_def = []
+                    for col in data_copy.columns:
+                        dtype = data_copy[col].dtype
+                        if pd.api.types.is_integer_dtype(dtype):
+                            sql_type = 'INTEGER'
+                        elif pd.api.types.is_float_dtype(dtype):
+                            sql_type = 'REAL'
+                        else:
+                            sql_type = 'TEXT'
+                        columns_def.append(f'"{col}" {sql_type}')
+                    
+                    create_sql = f'CREATE TABLE IF NOT EXISTS "{table_name}" ({", ".join(columns_def)})'
+                    cursor.execute(create_sql)
+                
+                # 批量插入数据
+                columns = data_copy.columns.tolist()
+                placeholders = ', '.join(['?' for _ in columns])
+                col_names = ', '.join([f'"{col}"' for col in columns])
+                insert_sql = f'INSERT INTO "{table_name}" ({col_names}) VALUES ({placeholders})'
+                
+                rows = [tuple(row) for row in data_copy.values]
+                cursor.executemany(insert_sql, rows)
+                conn.commit()
+            
+            success = True
+            print(f"成功保存 {len(data_copy)} 条记录到 {table_name}")
+        except Exception as e:
+            # 出错时回滚
+            if conn is not None and not success:
+                try:
+                    conn.rollback()
+                except sqlite3.OperationalError as rollback_error:
+                    print(f"回滚事务出错: {rollback_error}")
+            print(f"保存数据到SQLite出错: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            # 确保连接关闭
+            if conn is not None:
+                conn.close()
 
 def read_from_sqlite(db_path, table_name):
     """从SQLite数据库读取数据"""
     conn = None
     df = None
     try:
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(db_path, timeout=30)
+        conn.execute("PRAGMA journal_mode=WAL")  # WAL模式：支持并发读写
         df = pd.read_sql_query(f"SELECT * FROM {table_name}", conn)
         print(f"从 {table_name} 读取了 {len(df)} 条记录")
         return df
@@ -958,85 +1266,104 @@ def append_to_sqlite(data, db_path, table_name):
     conn = None
     new_records = 0
     
-    try:
-        # 使用绝对路径
-        abs_db_path = os.path.abspath(db_path)
-        conn = sqlite3.connect(abs_db_path)
-        cursor = conn.cursor()
-        
-        # 检查表是否存在
-        cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}'")
-        table_exists = cursor.fetchone() is not None
-        
-        if not table_exists:
-            # 表不存在，直接创建并写入所有数据
-            data.to_sql(table_name, conn, if_exists='replace', index=False)
-            new_records = len(data)
-        else:
-            # 表存在，检查并添加缺失的列
-            cursor.execute(f"PRAGMA table_info({table_name})")
-            existing_columns = {row[1] for row in cursor.fetchall()}
-            new_columns = set(data.columns) - existing_columns
+    # 获取数据库写入锁（确保同一数据库的写入是串行的）
+    db_lock = _get_db_lock(db_path)
+    
+    with db_lock:  # 加锁
+        try:
+            # 使用绝对路径
+            abs_db_path = os.path.abspath(db_path)
+            conn = sqlite3.connect(abs_db_path, timeout=30)
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")  # WAL模式：支持并发读写
             
-            if new_columns:
-                for col in new_columns:
-                    # 获取该列的数据类型
+            # 检查表是否存在，不存在则先创建空表
+            cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}'")
+            table_exists = cursor.fetchone() is not None
+            
+            if not table_exists:
+                # 表不存在，先手动创建表结构
+                # 根据DataFrame的列名和类型生成CREATE TABLE语句
+                columns_def = []
+                for col in data.columns:
                     dtype = data[col].dtype
-                    if dtype == 'object':
+                    if dtype == 'object' or col == 'datetime':
                         sql_type = 'TEXT'
-                    elif dtype == 'float64':
+                    elif 'float' in str(dtype):
                         sql_type = 'REAL'
-                    elif dtype == 'int64':
+                    elif 'int' in str(dtype):
                         sql_type = 'INTEGER'
                     else:
                         sql_type = 'TEXT'
-                    
-                    try:
-                        cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {col} {sql_type}")
-                    except Exception as e:
-                        pass  # 列可能已存在
-                conn.commit()
-            
-            # 表存在，读取已有数据进行去重
-            try:
-                # 只读取datetime列用于去重判断
-                existing = pd.read_sql_query(f"SELECT datetime FROM {table_name}", conn)
+                    columns_def.append(f'"{col}" {sql_type}')
                 
-                if not existing.empty:
-                    # datetime已经是字符串格式，直接比较
-                    existing_dates = set(existing['datetime'])
-                    
-                    # 过滤掉已存在的数据
-                    if 'datetime' in data.columns:
-                        # datetime列是字符串，直接比较
-                        new_data = data[~data['datetime'].isin(existing_dates)]
+                create_sql = f'CREATE TABLE IF NOT EXISTS "{table_name}" ({", ".join(columns_def)})'
+                cursor.execute(create_sql)
+                conn.commit()
+                table_exists = True  # 现在表已创建
+            
+            # 表已存在，执行追加逻辑
+            if table_exists:
+                # 表存在，检查并添加缺失的列
+                cursor.execute(f"PRAGMA table_info({table_name})")
+                existing_columns = {row[1] for row in cursor.fetchall()}
+                new_columns = set(data.columns) - existing_columns
+                
+                if new_columns:
+                    for col in new_columns:
+                        # 获取该列的数据类型
+                        dtype = data[col].dtype
+                        if dtype == 'object':
+                            sql_type = 'TEXT'
+                        elif dtype == 'float64':
+                            sql_type = 'REAL'
+                        elif dtype == 'int64':
+                            sql_type = 'INTEGER'
+                        else:
+                            sql_type = 'TEXT'
                         
-                        if not new_data.empty:
-                            # 追加新数据
-                            new_data.to_sql(table_name, conn, if_exists='append', index=False)
-                            new_records = len(new_data)
-                    else:
-                        # 如果没有datetime列，直接追加
-                        data.to_sql(table_name, conn, if_exists='append', index=False)
-                        new_records = len(data)
-                else:
-                    # 表存在但为空，直接追加
-                    data.to_sql(table_name, conn, if_exists='append', index=False)
-                    new_records = len(data)
+                        try:
+                            cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {col} {sql_type}")
+                        except Exception as e:
+                            pass  # 列可能已存在
+                    conn.commit()
+                
+                # 表存在，读取已有数据进行去重
+                try:
+                    # 只读取datetime列用于去重判断
+                    existing = pd.read_sql_query(f'SELECT datetime FROM "{table_name}"', conn)
                     
-            except Exception as e:
-                # 如果读取失败，尝试直接追加（可能会有重复）
-                data.to_sql(table_name, conn, if_exists='append', index=False)
-                new_records = len(data)
-        
-        conn.commit()
-        
-    except Exception as e:
-        if conn:
-            conn.rollback()
-        raise
-    finally:
-        if conn:
-            conn.close()
+                    if not existing.empty:
+                        # datetime已经是字符串格式，直接比较
+                        existing_dates = set(existing['datetime'])
+                        
+                        # 过滤掉已存在的数据
+                        if 'datetime' in data.columns:
+                            # datetime列是字符串，直接比较
+                            new_data = data[~data['datetime'].isin(existing_dates)]
+                            
+                            if not new_data.empty:
+                                # 使用原生SQL INSERT插入数据（避免pandas to_sql的问题）
+                                new_records = _insert_dataframe(cursor, table_name, new_data)
+                        else:
+                            # 如果没有datetime列，直接追加
+                            new_records = _insert_dataframe(cursor, table_name, data)
+                    else:
+                        # 表存在但为空，直接追加
+                        new_records = _insert_dataframe(cursor, table_name, data)
+                        
+                except Exception as e:
+                    # 如果读取失败，尝试直接追加
+                    new_records = _insert_dataframe(cursor, table_name, data)
+            
+            conn.commit()
+            
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            raise
+        finally:
+            if conn:
+                conn.close()
     
-    return new_records 
+    return new_records

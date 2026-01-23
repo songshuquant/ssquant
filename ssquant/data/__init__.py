@@ -65,6 +65,16 @@ from .data_source import (
     MultiDataSource
 )
 
+from .contract_info import (
+    # 合约信息服务
+    get_trading_params,
+    get_main_contract,
+    get_contract_info,
+    get_contract_service,
+    refresh_contracts,
+    list_varieties,
+)
+
 __all__ = [
     # API数据获取
     'get_futures_data',
@@ -80,5 +90,13 @@ __all__ = [
     
     # 数据源管理
     'DataSource',
-    'MultiDataSource'
+    'MultiDataSource',
+    
+    # 合约信息服务
+    'get_trading_params',
+    'get_main_contract',
+    'get_contract_info',
+    'get_contract_service',
+    'refresh_contracts',
+    'list_varieties',
 ] 
