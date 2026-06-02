@@ -20,7 +20,7 @@ import subprocess
 import tempfile
 import re
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from flask import Flask, render_template, request, jsonify, Response
 from flask_cors import CORS
@@ -88,7 +88,10 @@ def get_default_settings():
             "model": "deepseek-chat",
             "temperature": 0.7,
             "base_url": "https://api.deepseek.com/v1",  # 用户可自定义的API接口地址
-            "extra_params": ""  # JSON字符串，支持思考模式等厂商特定参数
+            "extra_params": "",  # JSON字符串，支持思考模式等厂商特定参数
+            "thinking_mode": False,  # 是否启用思考模型（延长超时、显示思考过程）
+            "max_reasoning_length": 4000,  # 思考链最大字符数，0表示不限制
+            "max_tokens": 8192  # 回复最大token数
         },
         "backtest_params": {
             "strategy_mode": "single",
@@ -217,10 +220,11 @@ class AppState:
         self.strategy_history = load_history()  # 从文件加载历史记录
         self.backtest_running = False
         self.backtest_output_queue = queue.Queue()
+        self.current_process = None  # 当前运行的策略进程
         self.ai_generating = False  # AI是否正在生成
         self.ai_stop_flag = False  # 停止生成标志
         self.last_saved_code = ""  # 上次保存的代码（用于检测变化）
-        self.current_backtest_workspace_id = ""  # 当前回测关联的工作区ID
+        self.current_backtest_workspace_id = ""  # 当前运行关联的工作区ID
         
         # 从持久化文件加载设置
         saved_settings = load_persistent_settings()
@@ -287,6 +291,21 @@ def _parse_extra_params(settings):
     except Exception:
         return {}
 
+def _inject_claude_thinking(kwargs, settings):
+    """Claude 专属：如果用户开启了思考模式且未手动设置 thinking，自动注入 budget_tokens"""
+    if "thinking" in kwargs:
+        return  # 用户已通过 extra_params 手动设置，不覆盖
+    if not settings.get("thinking_mode"):
+        return  # 未开启思考模式
+    max_reasoning = settings.get("max_reasoning_length", 0)
+    if max_reasoning <= 0:
+        return  # 0 表示不限制，不注入
+    # budget_tokens 必须 >= 1024，且必须 < max_tokens
+    max_tokens = kwargs.get("max_tokens", 16384)
+    budget = max(1024, min(max_reasoning, max_tokens - 1024))
+    kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
+    print(f"[DEBUG] Claude thinking 自动注入: budget_tokens={budget}, max_tokens={max_tokens}")
+
 def _is_claude_provider(provider):
     """判断是否为 Claude 提供商（原生 Anthropic API）"""
     return provider and provider.lower() in ('claude', 'anthropic')
@@ -295,6 +314,7 @@ def _convert_messages_for_claude(messages):
     """
     将 OpenAI 格式的 messages 转换为 Claude 格式。
     Claude 要求 system prompt 作为独立参数，messages 中只能有 user/assistant。
+    支持多模态 content（图片 + 文本）。
     """
     system_parts = []
     claude_messages = []
@@ -302,16 +322,41 @@ def _convert_messages_for_claude(messages):
         role = msg.get("role", "")
         content = msg.get("content", "")
         if role == "system":
-            system_parts.append(content)
+            if isinstance(content, list):
+                text_parts = [c.get("text", "") for c in content if c.get("type") == "text"]
+                system_parts.append("\n".join(text_parts))
+            else:
+                system_parts.append(content)
         elif role in ("user", "assistant"):
-            claude_messages.append({"role": role, "content": content})
+            if isinstance(content, list):
+                claude_content = []
+                for item in content:
+                    if item.get("type") == "text":
+                        claude_content.append({"type": "text", "text": item.get("text", "")})
+                    elif item.get("type") == "image_url":
+                        url = item.get("image_url", {}).get("url", "")
+                        if url.startswith("data:"):
+                            media_type = url.split(";")[0].split(":")[1]
+                            data = url.split(",")[1]
+                            claude_content.append({
+                                "type": "image",
+                                "source": {"type": "base64", "media_type": media_type, "data": data}
+                            })
+                        else:
+                            claude_content.append({
+                                "type": "image",
+                                "source": {"type": "url", "url": url}
+                            })
+                claude_messages.append({"role": role, "content": claude_content})
+            else:
+                claude_messages.append({"role": role, "content": content})
         # 忽略其他 role（如 tool/function）
     system = "\n\n".join(system_parts) if system_parts else None
     return system, claude_messages
 
-# AI API调用（流式，支持 OpenAI / Claude 多厂商，静默自动续写）
+# AI API调用（流式，支持 OpenAI / Claude 多厂商，静默自动续写，自动重试）
 def call_ai_api_stream(messages, settings):
-    """调用AI API（流式输出，使用 OpenAI SDK，静默自动续写）
+    """调用AI API（流式输出，使用 OpenAI SDK，静默自动续写，出错自动重试5次）
     
     支持 OpenAI SDK 兼容格式 及 Claude (Anthropic) 原生 API
     用户可自定义 base_url 来使用不同的服务商
@@ -332,13 +377,16 @@ def call_ai_api_stream(messages, settings):
         return
     
     is_claude = _is_claude_provider(provider)
+    max_retries = 5
     
-    try:
+    def _do_stream():
+        """实际的流式调用（内部生成器）"""
         if is_claude:
             # ========== Claude (Anthropic) 流式调用 ==========
             import anthropic
             
-            client = anthropic.Anthropic(api_key=api_key, timeout=300.0)
+            api_timeout = 600.0 if settings.get('thinking_mode') else 300.0
+            client = anthropic.Anthropic(api_key=api_key, timeout=api_timeout)
             system_prompt, current_messages = _convert_messages_for_claude(messages)
             
             while True:  # 自动续写直到完成
@@ -346,12 +394,13 @@ def call_ai_api_stream(messages, settings):
                     "model": model,
                     "messages": current_messages,
                     "temperature": temperature,
-                    "max_tokens": 8192,
+                    "max_tokens": settings.get("max_tokens", 8192),
                     "stream": True,
                 }
                 if system_prompt:
                     kwargs["system"] = system_prompt
                 kwargs.update(_parse_extra_params(settings))
+                _inject_claude_thinking(kwargs, settings)
                 
                 stream = client.messages.create(**kwargs)
                 
@@ -360,6 +409,10 @@ def call_ai_api_stream(messages, settings):
                 
                 for chunk in stream:
                     if chunk.type == "content_block_delta":
+                        # 支持 Claude 3.7 Thinking 的 thinking 内容
+                        thinking = getattr(chunk.delta, 'thinking', None)
+                        if thinking:
+                            yield {"reasoning": thinking}
                         text = chunk.delta.text if hasattr(chunk.delta, 'text') else ""
                         if text:
                             chunk_response += text
@@ -386,7 +439,8 @@ def call_ai_api_stream(messages, settings):
             else:
                 base_url = "https://api.deepseek.com/v1"
             
-            client = OpenAI(api_key=api_key, base_url=base_url, timeout=300.0)
+            api_timeout = 600.0 if settings.get('thinking_mode') else 300.0
+            client = OpenAI(api_key=api_key, base_url=base_url, timeout=api_timeout)
             current_messages = messages.copy()
             
             while True:  # 自动续写直到完成
@@ -405,6 +459,10 @@ def call_ai_api_stream(messages, settings):
                 for chunk in stream:
                     if chunk.choices and len(chunk.choices) > 0:
                         delta = chunk.choices[0].delta
+                        # 支持思考模型（如 DeepSeek-R1）的 reasoning_content
+                        reasoning = getattr(delta, 'reasoning_content', None)
+                        if reasoning:
+                            yield {"reasoning": reasoning}
                         if delta and delta.content:
                             chunk_response += delta.content
                             yield {"content": delta.content}
@@ -418,16 +476,28 @@ def call_ai_api_stream(messages, settings):
                 else:
                     break
     
-    except Exception as e:
-        error_msg = str(e)
-        if "timeout" in error_msg.lower():
-            yield {"error": "API请求超时，请稍后重试"}
-        elif "connection" in error_msg.lower():
-            yield {"error": "网络连接失败，请检查网络"}
-        elif "api_key" in error_msg.lower() or "authentication" in error_msg.lower():
-            yield {"error": "API Key 无效，请检查配置"}
-        else:
-            yield {"error": f"API调用失败: {error_msg}"}
+    for attempt in range(max_retries + 1):
+        try:
+            yield from _do_stream()
+            return
+        except Exception as e:
+            error_msg = str(e)
+            if "timeout" in error_msg.lower():
+                friendly_error = "API请求超时"
+            elif "connection" in error_msg.lower():
+                friendly_error = "网络连接失败"
+            elif "api_key" in error_msg.lower() or "authentication" in error_msg.lower():
+                friendly_error = "API Key 无效"
+            else:
+                friendly_error = f"API调用失败: {error_msg}"
+            
+            if attempt < max_retries:
+                yield {"retry": attempt + 1, "max_retries": max_retries, "error": friendly_error}
+                import time
+                time.sleep(min(2 ** attempt, 30))  # 指数退避，最多30秒
+            else:
+                yield {"error": f"{friendly_error}（已重试{max_retries}次，请检查网络或API配置后重试）"}
+                return
 
 # AI API调用（非流式，用于分析等）
 def call_ai_api(messages, settings):
@@ -452,21 +522,30 @@ def call_ai_api(messages, settings):
             # ========== Claude (Anthropic) 非流式调用 ==========
             import anthropic
             
-            client = anthropic.Anthropic(api_key=api_key, timeout=120.0)
+            api_timeout = 300.0 if settings.get('thinking_mode') else 120.0
+            client = anthropic.Anthropic(api_key=api_key, timeout=api_timeout)
             system_prompt, claude_messages = _convert_messages_for_claude(messages)
             
             kwargs = {
                 "model": model,
                 "messages": claude_messages,
                 "temperature": temperature,
-                "max_tokens": 16384,
+                "max_tokens": settings.get("max_tokens", 16384),
             }
             if system_prompt:
                 kwargs["system"] = system_prompt
             kwargs.update(_parse_extra_params(settings))
+            _inject_claude_thinking(kwargs, settings)
             
             response = client.messages.create(**kwargs)
             content = response.content[0].text if response.content else ""
+            # 提取 Claude thinking 内容
+            reasoning = ""
+            for block in response.content:
+                if getattr(block, 'type', None) == 'thinking':
+                    reasoning += getattr(block, 'thinking', '')
+            if reasoning:
+                return {"content": content, "reasoning": reasoning}
             return {"content": content}
         else:
             # ========== OpenAI 兼容格式非流式调用 ==========
@@ -481,18 +560,24 @@ def call_ai_api(messages, settings):
             else:
                 base_url = "https://api.deepseek.com/v1"
             
-            client = OpenAI(api_key=api_key, base_url=base_url, timeout=120.0)
+            api_timeout = 300.0 if settings.get('thinking_mode') else 120.0
+            client = OpenAI(api_key=api_key, base_url=base_url, timeout=api_timeout)
             
             kwargs = {
                 "model": model,
                 "messages": messages,
                 "temperature": temperature,
-                "max_tokens": 16384,
+                "max_tokens": settings.get("max_tokens", 16384),
             }
             kwargs.update(_parse_extra_params(settings))
             response = client.chat.completions.create(**kwargs)
             
-            return {"content": response.choices[0].message.content}
+            msg = response.choices[0].message
+            content = msg.content or ""
+            reasoning = getattr(msg, 'reasoning_content', None)
+            if reasoning:
+                return {"content": content, "reasoning": reasoning}
+            return {"content": content}
     
     except Exception as e:
         return {"error": f"API调用失败: {str(e)}"}
@@ -716,14 +801,27 @@ def check_code_syntax(code):
         return False, f"代码检查失败: {str(e)}"
 
 def run_backtest_in_thread(strategy_code, params):
-    """在后台线程运行回测"""
+    """在后台线程运行策略"""
+    print(f"[DEBUG] run_backtest_in_thread 启动, backtest_running={state.backtest_running}")
     state.backtest_running = True
-    state.backtest_output_queue = queue.Queue()
+    # 清空队列而不是重新创建，避免与旧的 SSE 生成器竞争消息
+    while not state.backtest_output_queue.empty():
+        try:
+            state.backtest_output_queue.get_nowait()
+        except queue.Empty:
+            break
+    
+    # 检测运行模式
+    run_mode = detect_run_mode(strategy_code)
+    mode_name = get_run_mode_name(run_mode)
+    print(f"[DEBUG] 运行模式: {mode_name}")
     
     try:
         # 先检查代码语法
+        print("[DEBUG] 检查代码语法...")
         syntax_ok, syntax_error = check_code_syntax(strategy_code)
         if not syntax_ok:
+            print(f"[DEBUG] 语法检查失败: {syntax_error}")
             state.backtest_output_queue.put({
                 "type": "error", 
                 "message": f"⚠️ 代码语法检查失败！\n{syntax_error}\n\n请让AI修复后重试。"
@@ -732,60 +830,138 @@ def run_backtest_in_thread(strategy_code, params):
             state.backtest_running = False
             return
         
+        print("[DEBUG] 语法检查通过")
+        
         # 创建临时策略文件
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         strategy_file = STRATEGIES_DIR / f"strategy_{timestamp}.py"
         
-        # 注入回测参数
+        # 注入运行参数
         modified_code = inject_backtest_params(strategy_code, params)
         
         with open(strategy_file, 'w', encoding='utf-8') as f:
             f.write(modified_code)
         
+        print(f"[DEBUG] 策略文件已保存: {strategy_file}")
         state.backtest_output_queue.put({"type": "info", "message": f"策略文件已保存: {strategy_file.name}"})
-        state.backtest_output_queue.put({"type": "info", "message": "开始运行回测..."})
+        state.backtest_output_queue.put({"type": "info", "message": f"开始运行{mode_name}..."})
         
         # 设置环境变量，解决Windows下的Unicode编码问题
         env = os.environ.copy()
         env['PYTHONIOENCODING'] = 'utf-8'
         
+        # 确保日志目录存在
+        BACKTEST_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+        
+        # 使用临时日志文件代替 PIPE，避免 Windows 上 PIPE 阻塞问题
+        log_file_path = BACKTEST_LOGS_DIR / f"strategy_{timestamp}.log"
+        log_file = open(log_file_path, 'w', encoding='utf-8')
+        state.current_log_file = log_file  # 保存到 state，供 stop_backtest 关闭
+        
+        print(f"[DEBUG] 启动子进程: {sys.executable} {strategy_file}")
         # 运行策略
         process = subprocess.Popen(
             [sys.executable, str(strategy_file)],
-            stdout=subprocess.PIPE,
+            stdout=log_file,
             stderr=subprocess.STDOUT,
-            text=True,
             cwd=str(PROJECT_ROOT),
-            bufsize=1,
-            env=env,
-            encoding='utf-8'
+            env=env
         )
+        state.current_process = process
+        print(f"[DEBUG] 子进程 PID: {process.pid}")
         
         # 实时读取输出，收集错误信息
         output_lines = []
         error_lines = []
-        in_traceback = False
+        in_traceback = [False]
+        last_log_position = [0]  # 使用列表以便在闭包中修改
         
-        for line in iter(process.stdout.readline, ''):
-            if line:
-                stripped = line.strip()
-                output_lines.append(stripped)
-                
-                # 检测Traceback开始
-                if 'Traceback' in stripped:
-                    in_traceback = True
-                
-                # 收集错误相关的行
-                if in_traceback or 'Error' in stripped or 'Exception' in stripped:
-                    error_lines.append(stripped)
-                    state.backtest_output_queue.put({"type": "error", "message": stripped})
-                else:
-                    state.backtest_output_queue.put({"type": "output", "message": stripped})
+        def _reader():
+            """定期读取日志文件，避免 PIPE 阻塞"""
+            print("[DEBUG] _reader 线程启动")
+            try:
+                while True:
+                    try:
+                        with open(log_file_path, 'r', encoding='utf-8') as f:
+                            f.seek(last_log_position[0])
+                            new_lines = f.readlines()
+                            last_log_position[0] = f.tell()
+                        
+                        for line in new_lines:
+                            stripped = line.strip()
+                            if not stripped:
+                                continue
+                            output_lines.append(stripped)
+                            
+                            if 'Traceback' in stripped:
+                                in_traceback[0] = True
+                            
+                            if in_traceback[0] or 'Error' in stripped or 'Exception' in stripped:
+                                error_lines.append(stripped)
+                                state.backtest_output_queue.put({"type": "error", "message": stripped})
+                            else:
+                                state.backtest_output_queue.put({"type": "output", "message": stripped})
+                    except Exception as e:
+                        print(f"[DEBUG] _reader 读取异常: {e}")
+                        pass
+                    
+                    time.sleep(0.5)
+                    
+                    # 如果进程已结束且没有新内容，退出读取循环
+                    if process.poll() is not None:
+                        try:
+                            with open(log_file_path, 'r', encoding='utf-8') as f:
+                                f.seek(last_log_position[0])
+                                new_lines = f.readlines()
+                                last_log_position[0] = f.tell()
+                            if not new_lines:
+                                break
+                        except Exception:
+                            break
+            except Exception as e:
+                print(f"[DEBUG] _reader 线程异常: {e}")
+                pass
+            print("[DEBUG] _reader 线程结束")
         
-        process.wait()
+        reader_thread = threading.Thread(target=_reader)
+        reader_thread.daemon = True
+        reader_thread.start()
+        
+        # 主线程等待进程结束（带超时保护，默认 10 分钟）
+        print("[DEBUG] 主线程开始等待进程结束")
+        start_time = time.time()
+        timeout_seconds = 600  # 10 分钟超时
+        try:
+            while process.poll() is None:
+                elapsed = time.time() - start_time
+                if elapsed > timeout_seconds:
+                    print(f"[DEBUG] 子进程运行超过 {timeout_seconds} 秒，强制终止")
+                    state.backtest_output_queue.put({"type": "warning", "message": f"⚠️ 策略运行超过 {timeout_seconds//60} 分钟，已自动终止"})
+                    try:
+                        process.kill()
+                        process.wait(timeout=5)
+                    except Exception as e:
+                        print(f"[DEBUG] 超时 kill 失败: {e}")
+                    break
+                time.sleep(0.5)
+        except Exception as e:
+            print(f"[DEBUG] poll 循环异常: {e}")
+            pass
+        print(f"[DEBUG] 进程结束, returncode={process.returncode}")
+        
+        # 等待读取线程完成最后一轮读取
+        reader_thread.join(timeout=3)
+        
+        # 关闭日志文件
+        try:
+            log_file.close()
+        except Exception:
+            pass
+        finally:
+            state.current_log_file = None
         
         if process.returncode == 0:
-            state.backtest_output_queue.put({"type": "success", "message": "回测完成!"})
+            state.backtest_output_queue.put({"type": "success", "message": f"{mode_name}完成!"})
             # 查找最新的报告文件
             report_file = find_latest_report()
             if report_file:
@@ -795,7 +971,7 @@ def run_backtest_in_thread(strategy_code, params):
                 # 保存到历史（使用add_history自动持久化）
                 state.add_history({
                     "timestamp": timestamp,
-                    "name": f"回测_{timestamp}",
+                    "name": f"{mode_name}_{timestamp}",
                     "code": strategy_code,
                     "report_path": str(report_file),
                     "file_path": str(strategy_file),
@@ -807,18 +983,55 @@ def run_backtest_in_thread(strategy_code, params):
             # 将所有收集的错误信息组合
             if error_lines:
                 full_error = '\n'.join(error_lines)
-                state.backtest_output_queue.put({"type": "error", "message": f"回测失败:\n{full_error}"})
+                state.backtest_output_queue.put({"type": "error", "message": f"{mode_name}失败:\n{full_error}"})
             else:
-                state.backtest_output_queue.put({"type": "error", "message": f"回测失败，返回码: {process.returncode}"})
+                state.backtest_output_queue.put({"type": "error", "message": f"{mode_name}失败，返回码: {process.returncode}"})
             
     except Exception as e:
+        print(f"[DEBUG] run_backtest_in_thread 异常: {e}")
+        import traceback
+        traceback.print_exc()
         state.backtest_output_queue.put({"type": "error", "message": f"执行错误: {str(e)}"})
     finally:
+        print("[DEBUG] run_backtest_in_thread finally 执行")
         state.backtest_running = False
+        state.current_process = None
         state.backtest_output_queue.put({"type": "done"})
 
+def detect_run_mode(code):
+    """从策略代码中检测运行模式
+    
+    优先匹配 RUN_MODE = RunMode.XXX 的赋值语句，
+    避免被注释或其他地方的模式名称误导。
+    """
+    # 1. 优先查找明确的 RUN_MODE 赋值语句
+    match = re.search(r'RUN_MODE\s*=\s*RunMode\.(BACKTEST|SIMNOW|REAL_TRADING)', code)
+    if match:
+        return match.group(1)
+    
+    # 2. 备选：查找未被注释的 RunMode.XXX（在行首没有 #）
+    for line in code.split('\n'):
+        stripped = line.strip()
+        if stripped.startswith('#'):
+            continue
+        if 'RunMode.SIMNOW' in stripped:
+            return 'SIMNOW'
+        if 'RunMode.REAL_TRADING' in stripped:
+            return 'REAL_TRADING'
+    
+    return 'BACKTEST'
+
+def get_run_mode_name(mode):
+    """获取运行模式的中文名称"""
+    names = {
+        'SIMNOW': 'SIMNOW 模拟交易',
+        'REAL_TRADING': 'CTP 实盘交易',
+        'BACKTEST': '回测'
+    }
+    return names.get(mode, '回测')
+
 def inject_backtest_params(code, params):
-    """将回测参数注入到策略代码中"""
+    """将运行参数注入到策略代码中"""
     # 查找并替换配置参数
     replacements = {
         r"initial_capital\s*=\s*\d+": f"initial_capital={params.get('initial_capital', 1000000)}",
@@ -852,7 +1065,7 @@ def inject_backtest_params(code, params):
     return modified_code
 
 def find_latest_report():
-    """查找最新的回测报告"""
+    """查找最新的运行报告"""
     if not BACKTEST_RESULTS_DIR.exists():
         return None
     
@@ -865,7 +1078,7 @@ def find_latest_report():
     return latest
 
 def parse_report_metrics(report_path):
-    """解析回测报告的关键指标"""
+    """解析运行报告的关键指标"""
     try:
         with open(report_path, 'r', encoding='utf-8') as f:
             content = f.read()
@@ -906,7 +1119,12 @@ def chat():
     include_code = data.get('include_code', True)
     
     # 构建消息列表
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    system_content = SYSTEM_PROMPT
+    # 思考模式：追加约束，要求模型简要思考
+    if state.ai_settings.get("thinking_mode"):
+        max_reasoning = state.ai_settings.get("max_reasoning_length", 4000)
+        system_content += f"\n\n【重要约束】你当前处于思考模式。请保持思考简洁高效，不要过度分析或重复推演。思考内容控制在 {max_reasoning} 字符以内，直接给出结论和可执行代码。"
+    messages = [{"role": "system", "content": system_content}]
     
     # 添加历史消息
     for msg in history[-10:]:
@@ -936,11 +1154,14 @@ def chat():
 
 @app.route('/api/chat/stream', methods=['POST'])
 def chat_stream():
-    """AI对话接口（流式输出）"""
+    """AI对话接口（流式输出，支持图片/文本附件）"""
     data = request.json
     user_message = data.get('message', '')
     history = data.get('history', [])
-    editor_code = data.get('editor_code', '')  # 编辑器中的代码
+    editor_code = data.get('editor_code', '')
+    attachments = data.get('attachments', [])
+    
+    print(f"[DEBUG] /api/chat/stream 收到请求, user_message_len={len(user_message)}, history_len={len(history)}, ai_generating={state.ai_generating}")
     
     # 重置停止标志
     state.ai_stop_flag = False
@@ -958,7 +1179,25 @@ def chat_stream():
         context = f"\n\n【当前编辑器中的策略代码】：\n```python\n{editor_code}\n```\n\n请使用 SEARCH/REPLACE 格式精确修改需要改动的部分，不要重写整个代码。只有在创建全新策略时才返回完整代码。"
         user_message = user_message + context
     
-    messages.append({"role": "user", "content": user_message})
+    # 处理文本附件：将内容附加到用户消息中
+    for att in attachments:
+        if att.get('type') == 'text':
+            user_message += f"\n\n【上传文件: {att['name']}】\n```\n{att['data']}\n```"
+    
+    # 处理图片附件：使用多模态格式
+    image_attachments = [att for att in attachments if att.get('type') == 'image']
+    if image_attachments and not user_message.strip():
+        user_message = "请分析这张图片。"
+    if image_attachments:
+        content = [{"type": "text", "text": user_message}]
+        for att in image_attachments:
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": att['data']}
+            })
+        messages.append({"role": "user", "content": content})
+    else:
+        messages.append({"role": "user", "content": user_message})
     
     def generate():
         full_response = ""
@@ -979,6 +1218,10 @@ def chat_stream():
                 if "heartbeat" in chunk:
                     # 发送心跳保持连接
                     yield f"data: {json.dumps({'heartbeat': True}, ensure_ascii=False)}\n\n"
+                    continue
+                if "reasoning" in chunk:
+                    # 转发思考内容（完整显示，不做截断）
+                    yield f"data: {json.dumps({'reasoning': chunk['reasoning']}, ensure_ascii=False)}\n\n"
                     continue
                 if "content" in chunk:
                     full_response += chunk["content"]
@@ -1009,7 +1252,6 @@ def chat_stream():
     response = Response(generate(), mimetype='text/event-stream')
     response.headers['Cache-Control'] = 'no-cache'
     response.headers['X-Accel-Buffering'] = 'no'
-    response.headers['Connection'] = 'keep-alive'
     return response
 
 @app.route('/api/chat/stop', methods=['POST'])
@@ -1043,9 +1285,16 @@ def strategy():
 
 @app.route('/api/backtest/start', methods=['POST'])
 def start_backtest():
-    """启动回测"""
+    """启动策略运行"""
+    # 如果上一次运行仍在进行，先等待它结束（最多5秒）
     if state.backtest_running:
-        return jsonify({"success": False, "error": "已有回测正在运行"})
+        import time
+        for _ in range(10):
+            if not state.backtest_running:
+                break
+            time.sleep(0.5)
+        if state.backtest_running:
+            return jsonify({"success": False, "error": "已有策略正在运行，请等待结束或点击停止"})
     
     data = request.json
     code = data.get('code', state.current_strategy)
@@ -1055,42 +1304,92 @@ def start_backtest():
     if not code:
         return jsonify({"success": False, "error": "没有策略代码"})
     
-    # 保存当前工作区ID供回测使用
+    # 检测运行模式
+    run_mode = detect_run_mode(code)
+    mode_name = get_run_mode_name(run_mode)
+    
+    # 保存当前工作区ID供运行使用
     state.current_backtest_workspace_id = workspace_id
     
-    # 在后台线程运行回测
+    # 在后台线程运行策略
     thread = threading.Thread(target=run_backtest_in_thread, args=(code, params))
     thread.daemon = True
     thread.start()
     
-    return jsonify({"success": True, "message": "回测已启动"})
+    return jsonify({"success": True, "message": f"{mode_name}已启动", "run_mode": run_mode, "mode_name": mode_name})
 
 @app.route('/api/backtest/status')
 def backtest_status():
-    """获取回测状态（SSE流）"""
+    """获取运行状态（SSE流）"""
+    print(f"[DEBUG] SSE 连接建立, backtest_running={state.backtest_running}, queue大小={state.backtest_output_queue.qsize()}")
+    # 捕获当前队列引用，避免 run_backtest_in_thread 清空队列后切换到新队列
+    q = state.backtest_output_queue
     def generate():
+        msg_count = 0
         while True:
             try:
-                msg = state.backtest_output_queue.get(timeout=1)
+                msg = q.get(timeout=1)
+                msg_count += 1
+                print(f"[DEBUG] SSE 发送消息 #{msg_count}: {msg.get('type')}, {msg.get('message','')[:50]}")
                 yield f"data: {json.dumps(msg, ensure_ascii=False)}\n\n"
                 if msg.get("type") == "done":
+                    print("[DEBUG] SSE 收到 done，结束连接")
                     break
             except queue.Empty:
                 if not state.backtest_running:
+                    print("[DEBUG] SSE backtest_running=False，发送 done 并结束")
                     yield f"data: {json.dumps({'type': 'done'})}\n\n"
                     break
                 yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
     
-    return Response(generate(), mimetype='text/event-stream')
+    response = Response(generate(), mimetype='text/event-stream')
+    response.headers['Cache-Control'] = 'no-cache'
+    response.headers['X-Accel-Buffering'] = 'no'
+    return response
 
 @app.route('/api/backtest/running')
 def backtest_running():
-    """检查回测是否正在运行"""
+    """检查运行是否正在进行"""
     return jsonify({"running": state.backtest_running})
+
+@app.route('/api/backtest/stop', methods=['POST'])
+def stop_backtest():
+    """强制停止当前运行的策略进程"""
+    # 先关闭日志文件句柄，避免 Windows 上文件被占用
+    if hasattr(state, 'current_log_file') and state.current_log_file:
+        try:
+            state.current_log_file.close()
+        except Exception:
+            pass
+        state.current_log_file = None
+    
+    process = state.current_process
+    state.current_process = None
+    
+    if process and process.poll() is None:
+        try:
+            # Windows 上使用 taskkill /F /T 强制终止进程树，比 TerminateProcess 更可靠
+            if sys.platform == 'win32':
+                import subprocess as _sp
+                _sp.run(['taskkill', '/F', '/T', '/PID', str(process.pid)], 
+                       capture_output=True, timeout=10)
+            else:
+                process.kill()
+                process.wait(timeout=5)
+            print(f"[DEBUG] 进程 {process.pid} 已强制终止")
+        except Exception as e:
+            print(f"[DEBUG] 停止进程失败: {e}")
+    
+    # 重置前端状态并发送 done，确保前端不会卡住
+    state.backtest_running = False
+    state.backtest_output_queue.put({"type": "warning", "message": "⚠️ 策略进程已被强制终止"})
+    state.backtest_output_queue.put({"type": "done"})
+    
+    return jsonify({"success": True, "message": "已强制停止策略进程"})
 
 @app.route('/api/reports')
 def get_reports():
-    """获取回测报告列表"""
+    """获取运行报告列表"""
     workspace_id = request.args.get('workspace_id', '')
     
     if not BACKTEST_RESULTS_DIR.exists():
@@ -1178,7 +1477,7 @@ def delete_report(filename):
                 if perf_match and report_time:
                     try:
                         perf_time = datetime.strptime(perf_match.group(1), "%Y%m%d_%H%M%S")
-                        # 如果性能文件时间在报告时间之前60秒内，认为是同一次回测
+                        # 如果性能文件时间在报告时间之前60秒内，认为是同一次运行
                         if timedelta(seconds=0) <= (report_time - perf_time) <= timedelta(seconds=60):
                             print(f"[删除报告] 删除性能文件: {perf_file}")
                             perf_file.unlink()
@@ -1475,7 +1774,7 @@ def get_example(filename):
 
 @app.route('/api/analyze', methods=['POST'])
 def analyze_report():
-    """让AI分析回测报告"""
+    """让AI分析运行报告"""
     data = request.json
     report_path = data.get('report_path', '')
     
@@ -1491,9 +1790,9 @@ def analyze_report():
     
     # 构建分析请求
     analysis_prompt = f"""
-请分析以下回测结果并给出改进建议：
+请分析以下运行结果并给出改进建议：
 
-回测指标摘要:
+运行指标摘要:
 {json.dumps(metrics, ensure_ascii=False, indent=2)}
 
 优化目标:
@@ -1644,30 +1943,90 @@ def update_workspace(workspace_id):
 
 @app.route('/api/workspace/<workspace_id>', methods=['DELETE'])
 def delete_workspace(workspace_id):
-    """删除工作区"""
+    """删除工作区（级联删除关联的报告和策略文件）"""
     ws_file = get_workspace_file(workspace_id)
     if not ws_file.exists():
         return jsonify({"success": False, "error": "工作区不存在"})
     
+    deleted_reports = 0
+    deleted_strategies = 0
+    deleted_perfs = 0
+    
+    # 1. 删除关联的回测报告
+    try:
+        metadata = load_report_metadata()
+        reports_to_remove = [name for name, ws_id in metadata.items() if ws_id == workspace_id]
+        for report_name in reports_to_remove:
+            report_path = BACKTEST_RESULTS_DIR / report_name
+            if report_path.exists():
+                # 提取合约代码和时间戳，删除关联的 performance 文件
+                match = re.search(r'^(.+?)_report_(\d{8}_\d{6})\.html$', report_name)
+                if match:
+                    symbol = match.group(1)
+                    report_timestamp = match.group(2)
+                    report_date = report_timestamp.split('_')[0]
+                    try:
+                        report_time = datetime.strptime(report_timestamp, "%Y%m%d_%H%M%S")
+                        for perf_file in BACKTEST_RESULTS_DIR.glob(f"performance_{symbol}_{report_date}_*.txt"):
+                            perf_match = re.search(r'_(\d{8}_\d{6})\.txt$', perf_file.name)
+                            if perf_match:
+                                try:
+                                    perf_time = datetime.strptime(perf_match.group(1), "%Y%m%d_%H%M%S")
+                                    if timedelta(seconds=0) <= (report_time - perf_time) <= timedelta(seconds=60):
+                                        perf_file.unlink()
+                                        deleted_perfs += 1
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
+                report_path.unlink()
+                deleted_reports += 1
+            # 从元数据中移除
+            del metadata[report_name]
+        # 保存更新后的元数据
+        with open(REPORT_METADATA_FILE, 'w', encoding='utf-8') as f:
+            json.dump(metadata, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[删除工作区] 删除报告失败: {e}")
+    
+    # 2. 删除关联的策略文件和历史记录
+    try:
+        indices_to_remove = []
+        for i, item in enumerate(state.strategy_history):
+            if item.get('workspace_id') == workspace_id:
+                file_path = item.get('file_path')
+                if file_path:
+                    try:
+                        p = Path(file_path)
+                        if p.exists():
+                            p.unlink()
+                            deleted_strategies += 1
+                    except Exception as e:
+                        print(f"[删除工作区] 删除策略文件失败: {e}")
+                indices_to_remove.append(i)
+        # 从后往前删除，避免索引偏移
+        for i in reversed(indices_to_remove):
+            state.strategy_history.pop(i)
+        if indices_to_remove:
+            save_history_to_file(state.strategy_history)
+    except Exception as e:
+        print(f"[删除工作区] 删除策略历史失败: {e}")
+    
+    # 3. 删除工作区文件本身
     ws_file.unlink()
-    return jsonify({"success": True, "message": "工作区已删除"})
+    
+    return jsonify({
+        "success": True,
+        "message": f"工作区已删除（报告 {deleted_reports} 个，策略 {deleted_strategies} 个，性能文件 {deleted_perfs} 个）"
+    })
 
 # ==================== 主入口 ====================
-
-if __name__ == '__main__':
-    print("=" * 60)
-    print(">>> SSQuant AI Agent 启动中...")
-    print("=" * 60)
-    print(f"项目根目录: {PROJECT_ROOT}")
-    print(f"策略保存目录: {STRATEGIES_DIR}")
-    print(f"回测结果目录: {BACKTEST_RESULTS_DIR}")
-    print(f"工作区目录: {WORKSPACES_DIR}")
-    print(f"设置文件: {SETTINGS_FILE}")
-    print(f"历史记录: {HISTORY_FILE} ({len(state.strategy_history)} 条)")
-    print("=" * 60)
-    print("\n访问地址: http://localhost:5000")
-    print("\n按 Ctrl+C 停止服务\n")
-    
-    # 生产模式运行，关闭 debug 避免影响流式输出
-    app.run(debug=False, host='0.0.0.0', port=5000, threaded=True)
+# 
+# 注意：本文件不再支持直接运行（python backend.py）。
+# 生产环境请使用 start_server.py 启动：
+#     cd ai_agent
+#     python start_server.py
+# 
+# 如需调试，可在 start_server.py 中调整 waitress 的 expose_tracebacks=True
+# 或在代码中添加 logging 输出。
 

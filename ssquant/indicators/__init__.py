@@ -1,3 +1,1 @@
-"""
-indicators Ä£¿é
-"""
+"""Technical indicators package."""

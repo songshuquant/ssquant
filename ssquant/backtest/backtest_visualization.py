@@ -24,836 +24,666 @@ plt.rcParams['font.family'] = 'sans-serif'  # 使用上面设置的sans-serif字
 
 class BacktestVisualizer:
     """回测可视化工具，负责绘制各种回测图表"""
-    
+
     def __init__(self, logger=None):
         """初始化可视化工具
-        
+
         Args:
-            logger: 日志管理器实例
+            logger: 日志记录器，可以是BacktestLogger或logging.Logger
         """
         self.logger = logger
-        self.logo_array = self._load_logo()
-    
-    def log(self, message):
-        """记录日志
-        
-        Args:
-            message: 日志消息
-        """
-        if self.logger:
-            self.logger.log_message(message)
-        else:
-            print(message)
-    
-    def _load_logo(self):
-        """加载Logo图片"""
-        logo_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "squirrel_quant_logo.png")
-        if os.path.exists(logo_path):
-            try:
-                logo_img = Image.open(logo_path)
-                # 调整Logo大小，增加宽度，保持原始比例
-                logo_width = 400  # 缩小宽度
-                logo_height = 200  # 缩小高度
-                # 使用 LANCZOS 重采样（PIL 10.0.0+ 使用 Resampling.LANCZOS）
-                try:
-                    from PIL.Image import Resampling
-                    logo_img = logo_img.resize((logo_width, logo_height), Resampling.LANCZOS)
-                except (ImportError, AttributeError):
-                    # 兼容旧版本 PIL
-                    try:
-                        logo_img = logo_img.resize((logo_width, logo_height), 3)  # 3 = LANCZOS/ANTIALIAS
-                    except:
-                        logo_img = logo_img.resize((logo_width, logo_height))
-                logo_array = np.array(logo_img)
-                self.log("成功加载Logo图片")
-                return logo_array
-            except Exception as e:
-                self.log(f"加载Logo图片失败: {e}")
-                return None
-        else:
-            self.log(f"Logo图片不存在: {logo_path}")
-            return None
-    
-    def _add_logo_watermark(self, fig, gs):
-        if self.logo_array is not None:
-            try:
-                logo_ax = fig.add_subplot(gs[0])  
-                logo_ax.imshow(self.logo_array)
-                logo_ax.axis('off')  
-            except Exception as e:
-                self.log(f"lg: {e}")
-    
-    def generate_charts(self, results):
-        """生成回测图表
-        
-        Args:
-            results: 回测结果字典
-            
-        Returns:
-            image_paths: 图表文件路径列表
-        """
-        # 检查是否禁用可视化
-        if os.environ.get('NO_VISUALIZATION', '').lower() == 'true':
-            self.log("图表生成已被禁用 (NO_VISUALIZATION=True)")
-            return []
-            
-        # 检查是否禁用控制台日志
-        if os.environ.get('NO_CONSOLE_LOG', '').lower() == 'true':
-            # 完全静默模式，不生成任何输出
-            return []
-            
-        # 检查是否有结果可以可视化
-        if not results:
-            self.log("没有可用的回测结果，无法生成图表")
-            return []
-            
-        # 创建结果目录
-        result_dir = "backtest_results"
-        if not os.path.exists(result_dir):
-            os.makedirs(result_dir)
-            
-        # 当前时间戳，用于文件名
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        
-        # 记录图表路径
-        chart_paths = []
-        
-        try:
-            # 生成单个标的的K线和交易图
-            for key, result in results.items():
-                if not isinstance(result, dict) or 'trades' not in result or not result['trades']:
-                    continue
-                    
-                # 创建图表文件名
-                chart_filename = f"{key}_chart_{timestamp}.png"
-                chart_path = os.path.join(result_dir, chart_filename)
-                
-                # 生成K线和交易图
-                self._generate_price_chart(result, chart_path)
-                chart_paths.append(chart_path)
-                
-            # 注释掉组合权益曲线图生成逻辑，避免调用不存在的方法
-            # if any('equity_curve' in result for result in results.values() if isinstance(result, dict)):
-            #     equity_chart_filename = f"combined_equity_chart_{timestamp}.png"
-            #     equity_chart_path = os.path.join(result_dir, equity_chart_filename)
-            #     
-            #     self._generate_combined_equity_chart(results, equity_chart_path)
-            #     chart_paths.append(equity_chart_path)
-                
-            # 注释掉回撤图生成逻辑，避免调用不存在的方法
-            # drawdown_chart_filename = f"drawdown_chart_{timestamp}.png"
-            # drawdown_chart_path = os.path.join(result_dir, drawdown_chart_filename)
-            # 
-            # self._generate_drawdown_chart(results, drawdown_chart_path)
-            # chart_paths.append(drawdown_chart_path)
-                
-        except Exception as e:
-            self.log(f"生成图表时出错: {str(e)}")
-            
-        return chart_paths
-        
-    def plot_results(self, multi_data_source, results):
-        """绘制回测结果图表
-        
-        Args:
-            multi_data_source: 多数据源实例
-            results: 回测结果字典
-            
-        Returns:
-            image_paths: 图表文件路径列表
-        """
-        # 检查是否禁用可视化
-        if os.environ.get('NO_VISUALIZATION', '').lower() == 'true':
-            self.log("图表生成已被禁用 (NO_VISUALIZATION=True)")
-            return []
-        
-        # 检查是否禁用控制台日志
-        if os.environ.get('NO_CONSOLE_LOG', '').lower() == 'true':
-            # 完全静默模式，不生成任何输出
-            return []
-            
-        # 创建结果目录
-        result_dir = "backtest_results"
-        if not os.path.exists(result_dir):
-            os.makedirs(result_dir)
-        
-        # 添加调试信息，跟踪进度
-        self.log("\n=== 开始绘制回测图表 ===")
-        
-        image_paths = []
-        
-        # 遍历所有数据源，绘制单个品种的回测结果图表
-        for i, ds in enumerate(multi_data_source.data_sources):
-            # 获取交易记录
-            trades = ds.trades
-            
-            if not trades:
-                self.log(f"数据源 #{i} ({ds.symbol} {ds.kline_period}) 没有交易记录")
-                continue
-            
-            self.log(f"绘制数据源 #{i} ({ds.symbol} {ds.kline_period}) 的回测图表")
-            
-            # 创建图表 - 现在有3个子图：价格图、收益曲线图和回撤图
-            # 增加整体高度为24，宽度为22，为顶部LOGO留出足够空间
-            fig = plt.figure(figsize=(22, 24))
-            
-            # 创建网格布局，为顶部LOGO留出空间
-            gs = fig.add_gridspec(4, 1, height_ratios=[0.8, 3.5, 2.5, 1.2])
-            
-            # 创建三个子图，保持原有比例
-            ax1 = fig.add_subplot(gs[1])  # 价格图
-            ax2 = fig.add_subplot(gs[2])  # 收益曲线图
-            ax3 = fig.add_subplot(gs[3])  # 回撤图
-            
-            # 获取实际有数据的交易日期和价格
-            df = ds.data.copy()
-            
-            # 获取所有实际交易日期
-            trading_dates = df.index.tolist()
-            
-            # 创建X轴位置（使用整数索引而不是日期）
-            x_positions = list(range(len(trading_dates)))
-            
-            # 判断是K线数据还是TICK数据
-            is_kline_data = all(col in df.columns for col in ['open', 'high', 'low', 'close'])
-            
-            if is_kline_data:
-                # ========== K线数据：绘制蜡烛图 ==========
-                opens = df['open'].values
-                highs = df['high'].values
-                lows = df['low'].values
-                closes = df['close'].values
-                prices = closes  # 用于后续Y轴范围计算
-                
-                # 绘制K线（蜡烛图）
-                width = 0.6  # K线宽度
-                width2 = 0.1  # 影线宽度
-                
-                for i in range(len(x_positions)):
-                    x = x_positions[i]
-                    o, h, l, c = opens[i], highs[i], lows[i], closes[i]
-                    
-                    # 根据涨跌确定颜色（中国习惯：涨红跌绿）
-                    if c >= o:
-                        color = 'red'
-                        body_bottom = o
-                        body_height = c - o
-                    else:
-                        color = 'green'
-                        body_bottom = c
-                        body_height = o - c
-                    
-                    # 绘制影线（上下影线）
-                    ax1.plot([x, x], [l, h], color=color, linewidth=width2 * 10, zorder=1)
-                    
-                    # 绘制实体
-                    if body_height > 0:
-                        rect = plt.Rectangle((x - width/2, body_bottom), width, body_height,
-                                           facecolor=color, edgecolor=color, zorder=2)
-                        ax1.add_patch(rect)
-                    else:
-                        # 十字星：开盘=收盘
-                        ax1.plot([x - width/2, x + width/2], [o, o], color=color, linewidth=1, zorder=2)
-            else:
-                # ========== TICK数据：绘制价格曲线 ==========
-                if 'close' in df.columns:
-                    prices = df['close'].values
-                elif 'LastPrice' in df.columns:
-                    prices = df['LastPrice'].values
-                elif 'BidPrice1' in df.columns and 'AskPrice1' in df.columns:
-                    prices = ((df['BidPrice1'] + df['AskPrice1']) / 2).values
-                else:
-                    raise KeyError("数据中未找到价格字段（close/LastPrice/BidPrice1+AskPrice1）")
-                
-                # 绘制价格曲线
-                if len(x_positions) > 3:
-                    try:
-                        x_smooth = np.linspace(min(x_positions), max(x_positions), len(x_positions) * 3)
-                        if len(x_positions) > 10:
-                            spline = make_interp_spline(x_positions, prices, k=3)
-                            prices_smooth = spline(x_smooth)
-                        else:
-                            interp_func = interp1d(x_positions, prices, kind='linear')
-                            prices_smooth = interp_func(x_smooth)
-                        ax1.plot(x_smooth, prices_smooth, label='价格', color='black', linewidth=1, alpha=0.8, zorder=1)
-                    except Exception as e:
-                        self.log(f"价格曲线平滑处理失败，使用原始绘图: {e}")
-                        ax1.plot(x_positions, prices, label='价格', color='black', linewidth=1, alpha=0.8, zorder=1)
-                else:
-                    ax1.plot(x_positions, prices, label='价格', color='black', linewidth=1, alpha=0.8, zorder=1)
-            
-            # 绘制交易点，设置较高的zorder值，确保它们显示在价格曲线之上
-            for trade in trades:
-                # 找到交易日期在trading_dates中的位置
-                try:
-                    date_idx = trading_dates.index(trade['datetime'])
-                    
-                    if trade['action'] == '开多':
-                        ax1.scatter(date_idx, trade['price'], color='red', marker='^', s=100, zorder=5)
-                    elif trade['action'] == '平多':
-                        ax1.scatter(date_idx, trade['price'], color='blue', marker='v', s=100, zorder=5)
-                    elif trade['action'] == '开空':
-                        ax1.scatter(date_idx, trade['price'], color='green', marker='v', s=100, zorder=5)
-                    elif trade['action'] == '平空':
-                        ax1.scatter(date_idx, trade['price'], color='purple', marker='^', s=100, zorder=5)
-                except ValueError:
-                    # 如果交易日期不在trading_dates中，则跳过
-                    continue
-            
-            # 添加图例
-            from matplotlib.lines import Line2D
-            custom_lines = [
-                Line2D([0], [0], marker='^', color='red', markersize=10, linestyle=''),
-                Line2D([0], [0], marker='v', color='blue', markersize=10, linestyle=''),
-                Line2D([0], [0], marker='v', color='green', markersize=10, linestyle=''),
-                Line2D([0], [0], marker='^', color='purple', markersize=10, linestyle='')
-            ]
-            ax1.legend(custom_lines, ['开多', '平多', '开空', '平空'], loc='upper right')
-            
-            # 设置标题
-            ax1.set_title(f"{ds.symbol} {ds.kline_period} {'不复权' if ds.adjust_type == '0' else '后复权'} 回测结果", fontsize=16, fontproperties=plt.rcParams['font.sans-serif'][0])
-            ax1.grid(True)
-            
-            # 动态调整价格图的Y轴范围
-            if is_kline_data:
-                # K线图使用最高价和最低价
-                min_price = min(lows)
-                max_price = max(highs)
-            else:
-                min_price = min(prices)
-                max_price = max(prices)
-            
-            if max_price > min_price:
-                price_range = max_price - min_price
-                # 添加边距使图表更美观
-                padding = price_range * 0.05  # 5%的边距
-                ax1.set_ylim(min_price - padding, max_price + padding)
-            
-            # 获取计算好的权益曲线
-            if 'equity_curve' in results.get(f"{ds.symbol}_{ds.kline_period}_{'不复权' if ds.adjust_type == '0' else '后复权'}", {}):
-                equity_curve = results[f"{ds.symbol}_{ds.kline_period}_{'不复权' if ds.adjust_type == '0' else '后复权'}"]["equity_curve"]
-            else:
-                # 如果没有计算好的权益曲线，则重新计算
-                equity_curve = pd.Series(0.0, index=ds.data.index)
-                for trade in trades:
-                    if 'net_profit' in trade and trade['net_profit'] != 0:
-                        equity_curve[trade['datetime']] += trade['net_profit']
-                
-                # 累积求和并添加初始资金
-                initial_capital = results.get(f"{ds.symbol}_{ds.kline_period}_{'不复权' if ds.adjust_type == '0' else '后复权'}", {}).get('initial_capital', 100000.0)
-                equity_curve = initial_capital + equity_curve.cumsum()
-            
-            # 绘制收益曲线（使用整数索引）
-            equity_values = [equity_curve[date] for date in trading_dates]
-            
-            # 应用曲线平滑处理，使曲线更加平滑
-            if len(x_positions) > 3:  # 确保有足够的点进行插值
-                try:
-                    # 创建更多插值点以获得更平滑的曲线
-                    x_smooth = np.linspace(min(x_positions), max(x_positions), len(x_positions) * 3)
-                    
-                    # 使用三次样条插值（适合数据量较多的曲线）
-                    if len(x_positions) > 10:
-                        spline = make_interp_spline(x_positions, equity_values, k=3)
-                        equity_smooth = spline(x_smooth)
-                    else:
-                        # 对于数据点较少的情况，使用线性插值
-                        interp_func = interp1d(x_positions, equity_values, kind='linear')
-                        equity_smooth = interp_func(x_smooth)
-                    
-                    # 绘制平滑后的曲线
-                    ax2.plot(x_smooth, equity_smooth, label='收益曲线', color='blue', linewidth=2)
-                except Exception as e:
-                    # 如果插值失败，回退到原始绘图方式
-                    self.log(f"曲线平滑处理失败，使用原始绘图: {e}")
-                    ax2.plot(x_positions, equity_values, label='收益曲线', color='blue', linewidth=2)
-            else:
-                # 数据点太少，使用原始绘图
-                ax2.plot(x_positions, equity_values, label='收益曲线', color='blue', linewidth=2)
-            
-            ax2.set_title('收益曲线', fontsize=16, fontproperties=plt.rcParams['font.sans-serif'][0])
-            ax2.legend(fontsize=12, prop={'family': plt.rcParams['font.sans-serif'][0]})
-            ax2.grid(True)
-            
-            # 动态调整收益曲线图的Y轴范围
-            if equity_values:
-                min_equity = min(equity_values)
-                max_equity = max(equity_values)
-                equity_range = max_equity - min_equity
-                
-                # 使用相对范围，避免小范围时图形过度放大
-                min_range_pct = 0.02  # 最小范围为2%
-                relative_range = equity_range / max_equity if max_equity > 0 else 0
-                
-                if relative_range < min_range_pct:
-                    # 如果实际范围小于最小范围，则使用中心点扩展
-                    center = (min_equity + max_equity) / 2
-                    min_equity = center * (1 - min_range_pct / 2)
-                    max_equity = center * (1 + min_range_pct / 2)
-                else:
-                    # 添加边距使图表更美观
-                    padding = equity_range * 0.1  # 10%的边距
-                    min_equity = min_equity - padding
-                    max_equity = max_equity + padding
-                
-                ax2.set_ylim(min_equity, max_equity)
-            
-            # 计算并绘制回撤曲线
-            if equity_values:
-                # 计算累计最大值
-                cummax_values = []
-                max_value = float('-inf')
-                
-                # 正确计算累计最大值
-                for value in equity_values:
-                    if value > max_value:
-                        max_value = value
-                    cummax_values.append(max_value)
-                
-                # 计算回撤
-                drawdown = []
-                drawdown_pct = []
-                
-                for i in range(len(equity_values)):
-                    # 避免除以零或负数
-                    if cummax_values[i] > 0:
-                        dd = cummax_values[i] - equity_values[i]
-                        dd_pct = (dd / cummax_values[i]) * 100
-                        drawdown.append(dd)
-                        drawdown_pct.append(dd_pct)
-                    else:
-                        drawdown.append(0)
-                        drawdown_pct.append(0)
-                
-                # 绘制回撤曲线
-                ax3.fill_between(x_positions, 0, drawdown_pct, color='red', alpha=0.3)
-                ax3.set_title('回撤百分比', fontsize=16, fontproperties=plt.rcParams['font.sans-serif'][0])
-                ax3.set_ylabel('回撤 (%)', fontsize=14, fontproperties=plt.rcParams['font.sans-serif'][0])
-                ax3.grid(True)
-                
-                # 设置回撤图的Y轴范围，确保0点在图表顶部
-                max_drawdown = max(drawdown_pct) if drawdown_pct else 0
-                # 添加一些边距
-                padding = max(max_drawdown * 0.1, 1)  # 至少1%的边距
-                ax3.set_ylim(max_drawdown + padding, 0)
-            
-            # 设置X轴，只显示部分日期标签，避免拥挤
-            # 计算适当的刻度间隔，使标签不会过度拥挤
-            num_dates = len(trading_dates)
-            if num_dates <= 10:
-                tick_step = 1
-            elif num_dates <= 20:
-                tick_step = 2
-            elif num_dates <= 50:
-                tick_step = 5
-            elif num_dates <= 100:
-                tick_step = 10
-            else:
-                tick_step = num_dates // 10  # 大约10个刻度
-            
-            # 创建刻度位置列表
-            tick_indices = list(range(0, num_dates, tick_step))
-            if num_dates - 1 not in tick_indices:
-                tick_indices.append(num_dates - 1)  # 确保最后一个日期也显示
-            
-            ax1.set_xticks(tick_indices)
-            ax1.set_xticklabels([trading_dates[i].strftime('%Y-%m-%d') for i in tick_indices], rotation=45, fontsize=12)
-            ax1.tick_params(axis='y', labelsize=12)
-            ax2.set_xticks(tick_indices)
-            ax2.set_xticklabels([trading_dates[i].strftime('%Y-%m-%d') for i in tick_indices], rotation=45, fontsize=12)
-            ax2.tick_params(axis='y', labelsize=12)
-            ax3.set_xticks(tick_indices)
-            ax3.set_xticklabels([trading_dates[i].strftime('%Y-%m-%d') for i in tick_indices], rotation=45, fontsize=12)
-            ax3.tick_params(axis='y', labelsize=12)
-            
-            # 在每个子图左下角添加网站标记
-            ax1.text(0.01, 0.02, 'by quant789.com', transform=ax1.transAxes, fontsize=20, color='gray')
-            ax2.text(0.01, 0.02, 'by quant789.com', transform=ax2.transAxes, fontsize=20, color='gray')
-            ax3.text(0.01, 0.02, 'by quant789.com', transform=ax3.transAxes, fontsize=20, color='gray')
-            
-            # 调整布局
-            plt.tight_layout()
-            
-            # 添加Logo水印
-            self._add_logo_watermark(fig, gs)
-            
-            # 保存图表
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            image_path = os.path.join(result_dir, f"{ds.symbol}_{ds.kline_period}_{'不复权' if ds.adjust_type == '0' else '后复权'}_backtest_chart_{timestamp}.png")
-            plt.savefig(image_path)
-            plt.close()
-            
-            image_paths.append(image_path)
-            self.log(f"回测图表已保存到: {image_path}")
-        
-        # 创建综合收益图表
-        self.log("\n=== 开始创建综合收益图表 ===")
-        
-        # 获取所有数据源的收益曲线
-        all_equity_curves = []
-        all_symbols = []
-        
-        for i, ds in enumerate(multi_data_source.data_sources):
-            key = f"{ds.symbol}_{ds.kline_period}_{'不复权' if ds.adjust_type == '0' else '后复权'}"
-            if key in results and 'equity_curve' in results[key]:
-                all_equity_curves.append(results[key]['equity_curve'])
-                all_symbols.append(f"{ds.symbol}_{ds.kline_period}")
-                self.log(f"添加数据源 #{i} 的权益曲线，长度: {len(results[key]['equity_curve'])}")
-        
-        self.log(f"共找到 {len(all_equity_curves)} 个权益曲线")
-        
-        # 绘制综合收益图表（即使只有一个数据源）
-        if all_equity_curves:
-            try:
-                # 找到共同的日期范围
-                # 如果只有一个数据源，直接使用它的所有日期
-                if len(all_equity_curves) == 1:
-                    common_dates = list(all_equity_curves[0].index)
-                    self.log(f"只有一个数据源，使用其所有日期: {len(common_dates)} 个日期")
-                else:
-                    # 找到多个数据源的共同日期
-                    common_dates = set(all_equity_curves[0].index)
-                    for curve in all_equity_curves[1:]:
-                        common_dates = common_dates.intersection(set(curve.index))
-                    common_dates = sorted(list(common_dates))
-                    self.log(f"多个数据源的共同日期: {len(common_dates)} 个日期")
-                
-                if not common_dates:
-                    self.log("没有找到共同日期，使用第一个权益曲线的全部日期")
-                    common_dates = sorted(list(all_equity_curves[0].index))
-                
-                self.log(f"共同日期范围: {common_dates[0]} 到 {common_dates[-1]}, 共 {len(common_dates)} 个日期")
-                
-                # 创建综合收益图表
-                self.log("创建综合收益图表...")
-                fig = plt.figure(figsize=(22, 22))
-                
-                # 创建网格布局，为顶部LOGO留出空间
-                gs = fig.add_gridspec(3, 1, height_ratios=[0.8, 3.5, 1.2])
-                
-                # 创建两个子图
-                ax1 = fig.add_subplot(gs[1])  # 收益曲线图
-                ax2 = fig.add_subplot(gs[2])  # 回撤图
-                
-                # 添加Logo水印
-                self._add_logo_watermark(fig, gs)
-                
-                # 创建X轴位置
-                x_positions = list(range(len(common_dates)))
-                
-                # 获取各品种的初始资金
-                initial_capitals = {}
-                for i, ds in enumerate(multi_data_source.data_sources):
-                    key = f"{ds.symbol}_{ds.kline_period}_{'不复权' if ds.adjust_type == '0' else '后复权'}"
-                    if key in results:
-                        initial_capitals[ds.symbol] = results[key].get('initial_capital', 100000.0)
-                
-                # 计算总初始资金
-                total_initial_capital = sum(initial_capitals.values())
-                
-                # 绘制各个品种的收益曲线
-                for i, equity_curve in enumerate(all_equity_curves):
-                    symbol = all_symbols[i].split('_')[0]
-                    initial_capital = initial_capitals.get(symbol, 100000.0)
-                    
-                    # 计算每个日期的净值
-                    equity_values = []
-                    for date in common_dates:
-                        if date in equity_curve.index:
-                            equity_values.append(equity_curve[date] / initial_capital)
-                        else:
-                            equity_values.append(1.0)
-                    
-                    # 应用曲线平滑处理
-                    if len(x_positions) > 3:
-                        try:
-                            x_smooth = np.linspace(min(x_positions), max(x_positions), len(x_positions) * 3)
-                            if len(x_positions) > 10:
-                                spline = make_interp_spline(x_positions, equity_values, k=3)
-                                equity_smooth = spline(x_smooth)
-                            else:
-                                interp_func = interp1d(x_positions, equity_values, kind='linear')
-                                equity_smooth = interp_func(x_smooth)
-                            ax1.plot(x_smooth, equity_smooth, label=all_symbols[i])
-                        except Exception as e:
-                            self.log(f"{all_symbols[i]}曲线平滑处理失败: {e}")
-                            ax1.plot(x_positions, equity_values, label=all_symbols[i])
-                    else:
-                        ax1.plot(x_positions, equity_values, label=all_symbols[i])
-                
-                # 计算综合收益曲线
-                combined_equity = []
-                for date in common_dates:
-                    curve_net_values = []
-                    for j, curve in enumerate(all_equity_curves):
-                        symbol = all_symbols[j].split('_')[0]
-                        initial_capital = initial_capitals.get(symbol, 100000.0)
-                        if date in curve.index:
-                            curve_net_values.append(curve[date] / initial_capital)
-                        else:
-                            curve_net_values.append(1.0)
-                    
-                    # 计算所有曲线的平均净值
-                    if curve_net_values:
-                        avg_net_value = sum(curve_net_values) / len(curve_net_values)
-                    else:
-                        avg_net_value = 1.0
-                    
-                    combined_equity.append(avg_net_value)
-                
-                # 绘制综合收益曲线
-                label = '综合净值' if len(all_equity_curves) > 1 else '策略净值'
-                
-                # 应用曲线平滑处理
-                if len(x_positions) > 3:
-                    try:
-                        x_smooth = np.linspace(min(x_positions), max(x_positions), len(x_positions) * 3)
-                        if len(x_positions) > 10:
-                            spline = make_interp_spline(x_positions, combined_equity, k=3)
-                            equity_smooth = spline(x_smooth)
-                        else:
-                            interp_func = interp1d(x_positions, combined_equity, kind='linear')
-                            equity_smooth = interp_func(x_smooth)
-                        ax1.plot(x_smooth, equity_smooth, label=label, linewidth=2, color='black')
-                    except Exception as e:
-                        self.log(f"综合收益曲线平滑处理失败: {e}")
-                        ax1.plot(x_positions, combined_equity, label=label, linewidth=2, color='black')
-                else:
-                    ax1.plot(x_positions, combined_equity, label=label, linewidth=2, color='black')
-                
-                ax1.set_title('综合收益图表', fontsize=16, fontproperties=plt.rcParams['font.sans-serif'][0])
-                ax1.set_ylabel('净值', fontsize=14, fontproperties=plt.rcParams['font.sans-serif'][0])
-                ax1.legend(fontsize=12, prop={'family': plt.rcParams['font.sans-serif'][0]})
-                ax1.grid(True)
-                
-                # 在收益曲线图左下角添加网站标记
-                ax1.text(0.01, 0.02, 'by quant789.com', transform=ax1.transAxes, fontsize=20, color='gray')
-                
-                # 计算并绘制回撤曲线
-                if combined_equity:
-                    # 计算累计最大值
-                    cummax_values = []
-                    max_value = float('-inf')
-                    
-                    for value in combined_equity:
-                        if value > max_value:
-                            max_value = value
-                        cummax_values.append(max_value)
-                    
-                    # 计算回撤
-                    drawdown_pct = []
-                    for i in range(len(combined_equity)):
-                        if cummax_values[i] > 0:
-                            dd_pct = ((cummax_values[i] - combined_equity[i]) / cummax_values[i]) * 100
-                            drawdown_pct.append(dd_pct)
-                        else:
-                            drawdown_pct.append(0)
-                    
-                    # 绘制回撤曲线
-                    ax2.fill_between(x_positions, 0, drawdown_pct, color='red', alpha=0.3)
-                    ax2.set_title('综合回撤百分比', fontsize=16, fontproperties=plt.rcParams['font.sans-serif'][0])
-                    ax2.set_ylabel('回撤 (%)', fontsize=14, fontproperties=plt.rcParams['font.sans-serif'][0])
-                    ax2.grid(True)
-                    
-                    # 设置回撤图的Y轴范围
-                    max_drawdown = max(drawdown_pct) if drawdown_pct else 0
-                    padding = max(max_drawdown * 0.1, 1)
-                    ax2.set_ylim(max_drawdown + padding, 0)
-                
-                # 在回撤图左下角添加网站标记
-                ax2.text(0.01, 0.02, 'by quant789.com', transform=ax2.transAxes, fontsize=20, color='gray')
-                
-                # 设置X轴刻度
-                num_dates = len(common_dates)
-                tick_step = max(1, num_dates // 10)
-                tick_indices = list(range(0, num_dates, tick_step))
-                if num_dates - 1 not in tick_indices:
-                    tick_indices.append(num_dates - 1)
-                
-                ax1.set_xticks(tick_indices)
-                ax1.set_xticklabels([common_dates[i].strftime('%Y-%m-%d') for i in tick_indices], rotation=45, fontsize=12)
-                ax2.set_xticks(tick_indices)
-                ax2.set_xticklabels([common_dates[i].strftime('%Y-%m-%d') for i in tick_indices], rotation=45, fontsize=12)
-                
-                # 调整布局
-                plt.tight_layout()
-                
-                # 保存综合收益图表
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                combined_image_path = os.path.join(result_dir, f"combined_equity_chart_{timestamp}.png")
-                plt.savefig(combined_image_path)
-                plt.close()
-                
-                image_paths.append(combined_image_path)
-                self.log(f"综合收益图表已保存到: {combined_image_path}")
-            except Exception as e:
-                self.log(f"创建综合收益图表时出错: {str(e)}")
-                import traceback
-                self.log(traceback.format_exc())
-        else:
-            self.log("没有找到任何权益曲线，无法创建综合收益图表")
-        
-        self.log("=== 绘制回测图表完成 ===\n")
-        return image_paths 
 
-    def _generate_price_chart(self, result, chart_path):
-        """生成K线和交易图
-        
+        # 加载Logo水印
+        self.logo_path = self._find_logo_path()
+        if self.logo_path:
+            self.log(f"找到Logo文件: {self.logo_path}")
+        else:
+            self.log("未找到Logo文件，将不使用水印")
+
+    def log(self, message, level='INFO'):
+        """记录日志"""
+        if self.logger:
+            if hasattr(self.logger, 'log'):
+                self.logger.log(message, level=level)
+            elif hasattr(self.logger, 'log_message'):
+                self.logger.log_message(message)
+            elif hasattr(self.logger, 'info'):
+                self.logger.info(message)
+            else:
+                print(f"[{level}] {message}")
+        else:
+            print(f"[{level}] {message}")
+
+    def _find_logo_path(self):
+        """查找Logo文件路径"""
+        # 尝试多个可能的路径
+        possible_paths = [
+            'ssquant/assets/squirrel_quant_logo.png',
+            '../assets/squirrel_quant_logo.png',
+            '../../assets/squirrel_quant_logo.png',
+            'assets/squirrel_quant_logo.png',
+            os.path.join(os.path.dirname(__file__), '..', 'assets', 'squirrel_quant_logo.png'),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'assets', 'squirrel_quant_logo.png'),
+        ]
+
+        # 获取当前文件所在目录
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(os.path.dirname(current_dir))
+        possible_paths.append(os.path.join(project_root, 'ssquant', 'assets', 'squirrel_quant_logo.png'))
+
+        # 尝试使用pkg_resources查找
+        try:
+            import pkg_resources
+            resource_path = pkg_resources.resource_filename('ssquant', 'assets/squirrel_quant_logo.png')
+            possible_paths.append(resource_path)
+        except:
+            pass
+
+        # 尝试使用importlib查找（Python 3.9+）
+        try:
+            from importlib import resources
+            with resources.path('ssquant.assets', 'squirrel_quant_logo.png') as path:
+                possible_paths.append(str(path))
+        except:
+            pass
+
+        # 尝试使用importlib.util查找模块路径
+        try:
+            import importlib.util
+            spec = importlib.util.find_spec('ssquant')
+            if spec and spec.origin:
+                ssquant_dir = os.path.dirname(spec.origin)
+                possible_paths.append(os.path.join(ssquant_dir, 'assets', 'squirrel_quant_logo.png'))
+        except:
+            pass
+
+        # 查找可能的Logo文件
+        for path in possible_paths:
+            if os.path.exists(path):
+                return path
+
+        # 如果都找不到，尝试glob查找
+        try:
+            import glob
+            patterns = [
+                '**/squirrel_quant_logo.png',
+                '**/*logo*.png'
+            ]
+            for pattern in patterns:
+                matches = glob.glob(pattern, recursive=True)
+                if matches:
+                    return matches[0]
+        except:
+            pass
+
+        return None
+
+    def _add_logo_watermark(self, ax):
+        """在指定 axes 的右上角添加 Logo 水印，不占用额外子图空间。"""
+        if not self.logo_path or not os.path.exists(self.logo_path):
+            return
+        try:
+            from matplotlib.offsetbox import OffsetImage, AnnotationBbox
+            img = mpimg.imread(self.logo_path)
+            imagebox = OffsetImage(img, zoom=0.08)
+            ab = AnnotationBbox(imagebox, (0.98, 0.98), xycoords='axes fraction',
+                                frameon=False, pad=0, boxcoords="axes fraction",
+                                box_alignment=(1, 1), zorder=10)
+            ax.add_artist(ab)
+        except Exception as e:
+            self.log(f"添加Logo水印时出错: {str(e)}", level='WARNING')
+
+    def visualize_backtest(self, result, output_dir='.', show=False):
+        """生成回测结果可视化图表
+
         Args:
-            result: 单个回测结果字典
+            result: 回测结果字典，包含equity_curve、trades等
+            output_dir: 输出目录
+            show: 是否显示图表（在服务器环境中通常设置为False）
+
+        Returns:
+            dict: 包含生成的图表路径
+        """
+        charts = {}
+
+        try:
+            # 创建输出目录
+            os.makedirs(output_dir, exist_ok=True)
+
+            # 生成权益曲线图
+            equity_chart_path = os.path.join(output_dir, f"equity_curve_{result.get('symbol', 'unknown')}.png")
+            if self._generate_equity_curve(result, equity_chart_path):
+                charts['equity_curve'] = equity_chart_path
+
+            # 生成回撤图
+            drawdown_chart_path = os.path.join(output_dir, f"drawdown_{result.get('symbol', 'unknown')}.png")
+            if self._generate_drawdown_chart(result, drawdown_chart_path):
+                charts['drawdown'] = drawdown_chart_path
+
+            # 生成价格与交易图
+            price_chart_path = os.path.join(output_dir, f"price_chart_{result.get('symbol', 'unknown')}.png")
+            if self._generate_price_chart(result, price_chart_path):
+                charts['price_chart'] = price_chart_path
+
+            return charts
+
+        except Exception as e:
+            self.log(f"可视化过程中出错: {str(e)}", level='ERROR')
+            return charts
+
+    def _generate_equity_curve(self, result, chart_path):
+        """生成权益曲线图
+
+        Args:
+            result: 回测结果字典
             chart_path: 图表保存路径
-            
+
         Returns:
             True: 图表成功生成并保存
             False: 图表生成失败
         """
         try:
-            # 获取数据
+            # 获取权益曲线数据
+            equity_curve = result.get('equity_curve', [])
+
+            if not equity_curve or len(equity_curve) < 2:
+                self.log("权益曲线数据不足，无法生成图表")
+                return False
+
+            # 创建图表
+            fig = plt.figure(figsize=(16, 10))
+
+            # 创建网格布局
+            gs = fig.add_gridspec(2, 1, height_ratios=[2, 2])
+
+            # 转换为numpy数组以便处理
+            equity_array = np.array(equity_curve)
+
+            # 如果数据包含时间戳，分离时间和权益值
+            if isinstance(equity_curve[0], (list, tuple)) and len(equity_curve[0]) >= 2:
+                # 数据格式为[(time1, value1), (time2, value2), ...]
+                times = np.array([item[0] for item in equity_curve])
+                values = np.array([item[1] for item in equity_curve])
+            else:
+                # 数据格式为[value1, value2, ...]，使用时间索引
+                times = np.arange(len(equity_curve))
+                values = equity_array
+
+            # 创建权益曲线子图
+            ax_equity = fig.add_subplot(gs[0])
+
+            # 添加Logo水印
+            self._add_logo_watermark(ax_equity)
+
+            # 计算初始资金和最终权益
+            initial_capital = result.get('initial_capital', values[0] if len(values) > 0 else 100000)
+            final_equity = values[-1] if len(values) > 0 else initial_capital
+
+            # 判断整体盈亏，决定曲线颜色
+            if final_equity >= initial_capital:
+                curve_color = '#FF4500'  # 橙红色（盈利）
+            else:
+                curve_color = '#32CD32'  # 绿色（亏损）
+
+            # 绘制权益曲线
+            ax_equity.plot(times, values, color=curve_color, linewidth=2, label='权益曲线')
+
+            # 填充盈亏区域
+            ax_equity.fill_between(times, values, initial_capital,
+                                   where=(values >= initial_capital),
+                                   alpha=0.3, color='red', label='盈利区域')
+            ax_equity.fill_between(times, values, initial_capital,
+                                   where=(values < initial_capital),
+                                   alpha=0.3, color='green', label='亏损区域')
+
+            # 添加初始资金水平线
+            ax_equity.axhline(y=initial_capital, color='gray', linestyle='--', linewidth=1, alpha=0.7, label=f'初始资金: {initial_capital:.2f}')
+
+            # 添加标注
+            total_return = result.get('total_return', 0)
+            if total_return > 0:
+                return_text = f"+{total_return:.2f}%"
+                return_color = 'red'
+            else:
+                return_text = f"{total_return:.2f}%"
+                return_color = 'green'
+
+            # 标注最终权益
+            ax_equity.annotate(f'最终权益: {final_equity:.2f}\n总收益率: {return_text}',
+                              xy=(times[-1], final_equity),
+                              xytext=(times[-1], final_equity + (max(values) - min(values)) * 0.1),
+                              arrowprops=dict(arrowstyle='->', color=return_color),
+                              fontsize=12, color=return_color, fontweight='bold')
+
+            # 标注最大回撤点
+            max_dd_info = result.get('max_drawdown_info', {})
+            if max_dd_info and 'start_idx' in max_dd_info and 'end_idx' in max_dd_info:
+                try:
+                    start_idx = max_dd_info['start_idx']
+                    end_idx = max_dd_info['end_idx']
+                    if start_idx < len(times) and end_idx < len(times):
+                        start_time = times[start_idx]
+                        end_time = times[end_idx]
+                        start_value = values[start_idx]
+                        end_value = values[end_idx]
+
+                        # 绘制最大回撤区间
+                        ax_equity.plot([start_time, end_time], [start_value, end_value],
+                                      'b--', linewidth=2, label=f'最大回撤: {result.get("max_drawdown", 0):.2f}%')
+
+                        # 标注回撤开始和结束点
+                        ax_equity.plot(start_time, start_value, 'bo', markersize=8)
+                        ax_equity.plot(end_time, end_value, 'bs', markersize=8)
+
+                        # 添加回撤标注文字
+                        mid_time = (start_time + end_time) / 2
+                        mid_value = (start_value + end_value) / 2
+                        ax_equity.text(mid_time, mid_value, f'最大回撤: {result.get("max_drawdown", 0):.2f}%',
+                                      fontsize=10, color='blue', ha='center')
+                except Exception as e:
+                    self.log(f"标注最大回撤点时出错: {str(e)}")
+
+            # 设置标题和标签
+            symbol = result.get('symbol', '未知品种')
+            strategy_name = result.get('strategy_name', '未知策略')
+            ax_equity.set_title(f'{symbol} - {strategy_name} 权益曲线', fontsize=16)
+            ax_equity.set_xlabel('时间', fontsize=12)
+            ax_equity.set_ylabel('权益（元）', fontsize=12)
+            ax_equity.legend(loc='upper left')
+            ax_equity.grid(True, alpha=0.3)
+
+            # 格式化Y轴为货币格式
+            ax_equity.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:,.0f}'))
+
+            # 创建收益分布子图
+            ax_returns = fig.add_subplot(gs[1])
+
+            # 获取每笔交易的收益
+            trades = result.get('trades', [])
+            if trades and len(trades) > 0:
+                # 提取交易收益
+                trade_returns = []
+                for trade in trades:
+                    if isinstance(trade, dict) and 'net_profit' in trade:
+                        trade_returns.append(trade['net_profit'])
+                    elif isinstance(trade, (list, tuple)) and len(trade) >= 6:
+                        trade_returns.append(trade[5] if trade[5] is not None else 0)
+
+                if trade_returns:
+                    # 分离盈利和亏损
+                    profits = [r for r in trade_returns if r > 0]
+                    losses = [r for r in trade_returns if r < 0]
+
+                    # 绘制收益分布直方图
+                    bins = max(10, min(50, len(trade_returns) // 5))
+
+                    if profits:
+                        ax_returns.hist(profits, bins=bins, alpha=0.7, color='red', label=f'盈利交易 ({len(profits)}笔)')
+                    if losses:
+                        ax_returns.hist(losses, bins=bins, alpha=0.7, color='green', label=f'亏损交易 ({len(losses)}笔)')
+
+                    ax_returns.axvline(x=0, color='black', linestyle='-', linewidth=1)
+
+                    # 添加统计信息
+                    avg_profit = np.mean(profits) if profits else 0
+                    avg_loss = np.mean(losses) if losses else 0
+                    win_rate = result.get('win_rate', 0)
+
+                    stats_text = (
+                        f"总交易: {len(trade_returns)}笔\n"
+                        f"胜率: {win_rate:.2%}\n"
+                        f"平均盈利: {avg_profit:.2f}元\n"
+                        f"平均亏损: {avg_loss:.2f}元\n"
+                        f"盈亏比: {abs(avg_profit/avg_loss):.2f}" if avg_loss != 0 else "盈亏比: N/A"
+                    )
+
+                    ax_returns.text(0.98, 0.95, stats_text, transform=ax_returns.transAxes,
+                                   fontsize=11, verticalalignment='top', horizontalalignment='right',
+                                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+
+                    ax_returns.set_title('交易收益分布', fontsize=14)
+                    ax_returns.set_xlabel('收益（元）', fontsize=12)
+                    ax_returns.set_ylabel('交易次数', fontsize=12)
+                    ax_returns.legend()
+                    ax_returns.grid(True, alpha=0.3)
+            else:
+                ax_returns.text(0.5, 0.5, '无交易记录', transform=ax_returns.transAxes,
+                              fontsize=14, ha='center', va='center')
+                ax_returns.set_title('交易收益分布', fontsize=14)
+
+            # 添加整体统计信息
+            stats = {
+                '初始资金': f"{initial_capital:,.2f}",
+                '最终权益': f"{final_equity:,.2f}",
+                '总收益率': f"{total_return:.2f}%",
+                '最大回撤': f"{result.get('max_drawdown', 0):.2f}%",
+                '胜率': f"{result.get('win_rate', 0):.2%}",
+                '夏普比率': f"{result.get('sharpe_ratio', 0):.4f}",
+            }
+
+            stats_text = '\n'.join([f"{k}: {v}" for k, v in stats.items()])
+
+            # 在权益曲线图上添加统计信息框
+            ax_equity.text(0.02, 0.98, stats_text, transform=ax_equity.transAxes,
+                          fontsize=10, verticalalignment='top',
+                          bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+
+            # 调整布局并保存
+            plt.tight_layout()
+            plt.savefig(chart_path, dpi=150, bbox_inches='tight')
+            plt.close(fig)
+
+            self.log(f"权益曲线图已保存到: {chart_path}")
+            return True
+
+        except Exception as e:
+            self.log(f"生成权益曲线图时出错: {str(e)}")
+            plt.close('all')
+            return False
+
+    def _generate_drawdown_chart(self, result, chart_path):
+        """生成回撤分析图
+
+        Args:
+            result: 回测结果字典
+            chart_path: 图表保存路径
+
+        Returns:
+            True: 图表成功生成并保存
+            False: 图表生成失败
+        """
+        try:
+            # 获取权益曲线数据
+            equity_curve = result.get('equity_curve', [])
+
+            if not equity_curve or len(equity_curve) < 2:
+                self.log("权益曲线数据不足，无法生成回撤图")
+                return False
+
+            # 提取权益值
+            if isinstance(equity_curve[0], (list, tuple)) and len(equity_curve[0]) >= 2:
+                values = np.array([item[1] for item in equity_curve])
+            else:
+                values = np.array(equity_curve)
+
+            # 计算回撤
+            peak = np.maximum.accumulate(values)
+            drawdown = (peak - values) / peak * 100  # 百分比回撤
+
+            # 创建图表
+            fig, ax = plt.subplots(figsize=(16, 8))
+
+            # 添加Logo水印
+            self._add_logo_watermark(ax)
+
+            # 绘制回撤曲线
+            ax.fill_between(range(len(drawdown)), drawdown, 0, alpha=0.5, color='green', label='回撤')
+            ax.plot(range(len(drawdown)), drawdown, color='green', linewidth=1)
+
+            # 标记最大回撤点
+            max_dd_idx = np.argmax(drawdown)
+            max_dd_value = drawdown[max_dd_idx]
+
+            ax.plot(max_dd_idx, max_dd_value, 'rv', markersize=10)
+            ax.annotate(f'最大回撤: {max_dd_value:.2f}%',
+                       xy=(max_dd_idx, max_dd_value),
+                       xytext=(max_dd_idx, max_dd_value + 2),
+                       arrowprops=dict(arrowstyle='->', color='red'),
+                       fontsize=12, color='red', fontweight='bold')
+
+            # 设置标题和标签
+            symbol = result.get('symbol', '未知品种')
+            ax.set_title(f'{symbol} 回撤分析', fontsize=16)
+            ax.set_xlabel('时间', fontsize=12)
+            ax.set_ylabel('回撤 (%)', fontsize=12)
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+
+            # 添加统计信息
+            avg_drawdown = np.mean(drawdown)
+            stats_text = (
+                f"最大回撤: {max_dd_value:.2f}%\n"
+                f"平均回撤: {avg_drawdown:.2f}%\n"
+                f"回撤持续时间: {max_dd_idx} 周期"
+            )
+
+            ax.text(0.02, 0.98, stats_text, transform=ax.transAxes,
+                   fontsize=11, verticalalignment='top',
+                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+
+            # 保存图表
+            plt.tight_layout()
+            plt.savefig(chart_path, dpi=150, bbox_inches='tight')
+            plt.close(fig)
+
+            self.log(f"回撤图已保存到: {chart_path}")
+            return True
+
+        except Exception as e:
+            self.log(f"生成回撤图时出错: {str(e)}")
+            plt.close('all')
+            return False
+
+    def _generate_price_chart(self, result, chart_path):
+        """生成K线（蜡烛图）和交易信号图，使用整数索引作为x轴以避免非交易时段连线问题。
+
+        Args:
+            result: 单个回测结果字典，需包含 klines (DataFrame 含 datetime/open/high/low/close)
+                    和 trades (列表含 datetime/price/action 等)
+            chart_path: 图表保存路径
+
+        Returns:
+            bool: True 表示成功生成并保存，False 表示失败
+        """
+        try:
+            # ---------- 1. 数据提取与校验 ----------
             symbol = result.get('symbol', '未知品种')
             kline_period = result.get('kline_period', '未知周期')
             trades = result.get('trades', [])
             klines = result.get('klines', pd.DataFrame())
-            
-            # 检查数据可用性
-            if not trades or klines.empty:
-                self.log(f"无足够数据生成 {symbol}_{kline_period} 的图表")
+
+            if klines.empty:
+                self.log(f"K线数据为空，无法生成 {symbol}_{kline_period} 的图表")
                 return False
-                
-            # 如果klines不是DataFrame，尝试转换
+
             if not isinstance(klines, pd.DataFrame):
-                self.log(f"K线数据格式错误，尝试进行转换")
-                # 尝试将字典列表转换为DataFrame
                 if isinstance(klines, list) and len(klines) > 0 and isinstance(klines[0], dict):
                     klines = pd.DataFrame(klines)
                 else:
-                    self.log(f"无法转换K线数据为DataFrame，无法生成图表")
+                    self.log(f"K线数据格式错误，无法生成图表")
                     return False
-            
-            # 创建图表 - 现在只有1个子图：价格图
-            fig = plt.figure(figsize=(16, 10))
-            
-            # 创建网格布局，为顶部LOGO留出空间
-            gs = fig.add_gridspec(2, 1, height_ratios=[0.8, 4.5])
-            
-            # 添加Logo水印
-            self._add_logo_watermark(fig, gs)
-            
-            # 创建价格图
-            ax = fig.add_subplot(gs[1])
-            
-            # 绘制K线图
-            if 'datetime' in klines.columns and 'open' in klines.columns and 'high' in klines.columns and 'low' in klines.columns and 'close' in klines.columns:
-                dates = pd.to_datetime(klines['datetime'])
-                opens = klines['open']
-                highs = klines['high']
-                lows = klines['low']
-                closes = klines['close']
-                
-                # 绘制收盘价折线图
-                ax.plot(dates, closes, color='blue', linewidth=1, label='收盘价')
-                
-                # 标出最高价和最低价
-                highest_idx = highs.idxmax()
-                lowest_idx = lows.idxmin()
-                
-                # 获取具体的日期和价格值（处理pandas Series）
-                import numpy as np
-                high_date = dates.loc[highest_idx]
-                high_price = highs.loc[highest_idx]
-                low_date = dates.loc[lowest_idx]
-                low_price = lows.loc[lowest_idx]
-                
-                # 如果是timestamp对象，转换为datetime
-                if hasattr(high_date, 'to_pydatetime'):
-                    high_date = high_date.to_pydatetime()
-                if hasattr(low_date, 'to_pydatetime'):
-                    low_date = low_date.to_pydatetime()
-                
-                ax.plot(high_date, float(high_price), 'r^', markersize=10)
-                ax.text(high_date, float(high_price), 
-                        f" 最高: {float(high_price):.2f}", verticalalignment='bottom')
-                
-                ax.plot(low_date, float(low_price), 'gv', markersize=10)
-                ax.text(low_date, float(low_price), 
-                        f" 最低: {float(low_price):.2f}", verticalalignment='top')
-                
-                # 绘制交易点
-                for trade in trades:
-                    if 'datetime' in trade and 'price' in trade and 'action' in trade:
-                        trade_time = pd.to_datetime(trade['datetime'])
-                        price = trade['price']
-                        action = trade['action']
-                        
-                        if action in ['开多', '买多']:
-                            marker = '^'  # 上三角
-                            color = 'r'
-                            label = '买入'
-                        elif action in ['开空', '卖空']:
-                            marker = 'v'  # 下三角
-                            color = 'g'
-                            label = '卖出'
-                        elif action in ['平多', '卖多']:
-                            marker = 'o'  # 圆圈
-                            color = 'g'
-                            label = '平多'
-                        elif action in ['平空', '买空']:
-                            marker = 'o'  # 圆圈
-                            color = 'r'
-                            label = '平空'
-                        else:
-                            continue
-                            
-                        ax.plot(trade_time, price, marker=marker, markersize=8, color=color)
-                        
-                        # 显示盈亏信息
-                        if action in ['平多', '卖多', '平空', '买空'] and 'net_profit' in trade:
-                            net_profit = trade.get('net_profit', 0)
-                            if net_profit > 0:
-                                profit_text = f"+{net_profit:.2f}"
-                                text_color = 'red'
-                            else:
-                                profit_text = f"{net_profit:.2f}"
-                                text_color = 'green'
-                                
-                            ax.text(trade_time, price, profit_text, color=text_color, fontsize=9, verticalalignment='top')
-                
-                # 设置图表格式
-                ax.set_title(f"{symbol} {kline_period} K线与交易记录", fontsize=16)
-                ax.set_xlabel('日期', fontsize=12)
-                ax.set_ylabel('价格', fontsize=12)
-                ax.grid(True, alpha=0.3)
-                
-                # 格式化横轴日期
-                plt.gcf().autofmt_xdate()
-                
-                # 添加收益信息
-                net_profit = result.get('total_net_profit', 0)
-                win_rate = result.get('win_rate', 0)
-                max_drawdown = result.get('max_drawdown_pct', 0)
-                
-                info_text = (
-                    f"总收益: {net_profit:.2f} 元 ({(net_profit / result.get('initial_capital', 100000.0) * 100):.2f}%)\n"
-                    f"胜率: {win_rate:.2%}\n"
-                    f"最大回撤: {max_drawdown:.2f}"
-                )
-                
-                # 在图表右上角添加文本框
-                props = dict(boxstyle='round', facecolor='wheat', alpha=0.3)
-                ax.text(0.02, 0.98, info_text, transform=ax.transAxes, fontsize=11, 
-                        verticalalignment='top', bbox=props)
-                
-                # 保存图表
-                plt.tight_layout()
-                plt.savefig(chart_path, dpi=100)
-                plt.close(fig)
-                
-                self.log(f"K线和交易图已保存到: {chart_path}")
-                return True
-            else:
-                self.log(f"K线数据缺少必要列，无法生成图表")
+
+            required_cols = {'datetime', 'open', 'high', 'low', 'close'}
+            if not required_cols.issubset(klines.columns):
+                self.log(f"K线数据缺少必要列 {required_cols - set(klines.columns)}，无法生成图表")
                 return False
-                
+
+            # ---------- 2. 预处理 ----------
+            n = len(klines)
+            dates = pd.to_datetime(klines['datetime'])
+            opens = klines['open'].astype(float).values
+            highs = klines['high'].astype(float).values
+            lows = klines['low'].astype(float).values
+            closes = klines['close'].astype(float).values
+
+            # 整数索引映射：x=0..n-1
+            x = np.arange(n)
+
+            # 建立 datetime -> 最近K线索引的映射（用于交易信号定位）
+            # 使用 numpy searchsorted 进行高效二分查找
+            kline_ts = dates.view('int64').values
+
+            # ---------- 3. 创建画布 ----------
+            fig, ax = plt.subplots(figsize=(16, 9))
+            self._add_logo_watermark(ax)
+
+            # ---------- 4. 向量化绘制蜡烛图 ----------
+            up_color = '#e74c3c'      # 涨：红色（A股习惯）
+            down_color = '#2ecc71'    # 跌：绿色
+            body_width = 0.75
+
+            colors = np.where(closes >= opens, up_color, down_color)
+            body_bottoms = np.minimum(opens, closes)
+            body_heights = np.abs(closes - opens)
+
+            from matplotlib.collections import LineCollection
+
+            # 影线：一次性 LineCollection（比逐根 ax.plot 快 10~50 倍）
+            segments = np.empty((n, 2, 2))
+            segments[:, 0, 0] = x
+            segments[:, 0, 1] = lows
+            segments[:, 1, 0] = x
+            segments[:, 1, 1] = highs
+            lc = LineCollection(segments, colors=colors, linewidths=0.8, capstyle='butt')
+            ax.add_collection(lc)
+
+            # 实体：向量化 bar
+            nonzero = body_heights >= 1e-9
+            if np.any(nonzero):
+                ax.bar(x[nonzero], body_heights[nonzero], width=body_width,
+                       bottom=body_bottoms[nonzero], color=colors[nonzero],
+                       edgecolor=colors[nonzero], linewidth=0.5, align='center')
+            # 十字星横线
+            zmask = ~nonzero
+            if np.any(zmask):
+                zidx = np.where(zmask)[0]
+                zseg = np.empty((len(zidx), 2, 2))
+                zseg[:, 0, 0] = x[zidx] - body_width / 2
+                zseg[:, 0, 1] = opens[zidx]
+                zseg[:, 1, 0] = x[zidx] + body_width / 2
+                zseg[:, 1, 1] = opens[zidx]
+                lc_zero = LineCollection(zseg, colors=colors[zmask], linewidths=1.0)
+                ax.add_collection(lc_zero)
+
+            # ---------- 5. 标记最高/最低点 ----------
+            highest_idx = int(np.argmax(highs))
+            lowest_idx = int(np.argmin(lows))
+            ax.plot(x[highest_idx], highs[highest_idx], 'r^', markersize=10, zorder=5)
+            ax.text(x[highest_idx], highs[highest_idx], f" 最高: {highs[highest_idx]:.2f}",
+                    verticalalignment='bottom', fontsize=9, color='darkred')
+            ax.plot(x[lowest_idx], lows[lowest_idx], 'gv', markersize=10, zorder=5)
+            ax.text(x[lowest_idx], lows[lowest_idx], f" 最低: {lows[lowest_idx]:.2f}",
+                    verticalalignment='top', fontsize=9, color='darkgreen')
+
+            # ---------- 6. 绘制交易信号（向量化） ----------
+            action_style = {
+                '开多': ('^', up_color),
+                '买多': ('^', up_color),
+                '开空': ('v', down_color),
+                '卖空': ('v', down_color),
+                '平多': ('o', down_color),
+                '卖多': ('o', down_color),
+                '平空': ('o', up_color),
+                '买空': ('o', up_color),
+                '平空开多': ('^', '#c0392b'),
+                '平多开空': ('v', '#27ae60'),
+            }
+
+            # 按 marker 分组，批量 scatter
+            trade_groups = {}   # marker -> list of (x, y, color)
+            profit_texts = []   # (x, y, text, color, va)
+            hl_range = max(highs) - min(lows)
+
+            for trade in trades:
+                if not all(k in trade for k in ('datetime', 'price', 'action')):
+                    continue
+                trade_dt = pd.to_datetime(trade['datetime'])
+                trade_ts = trade_dt.value
+                price = float(trade['price'])
+                action = trade['action']
+
+                idx = int(np.searchsorted(kline_ts, trade_ts, side='left'))
+                if idx >= n:
+                    idx = n - 1
+                elif idx > 0 and abs(kline_ts[idx] - trade_ts) > abs(kline_ts[idx - 1] - trade_ts):
+                    idx -= 1
+
+                marker, color = action_style.get(action, (None, None))
+                if marker is None:
+                    continue
+
+                offset_dir = 1 if '开' in action else -1
+                y_offset = (highs[idx] - lows[idx]) * 0.15 * offset_dir
+                if y_offset < 1e-9:
+                    y_offset = hl_range * 0.01 * offset_dir
+                y_pos = price + y_offset
+
+                trade_groups.setdefault(marker, []).append((float(x[idx]), float(y_pos), color))
+
+                if '平' in action and 'net_profit' in trade:
+                    net_profit = float(trade['net_profit'])
+                    profit_text = f"+{net_profit:.2f}" if net_profit > 0 else f"{net_profit:.2f}"
+                    text_color = up_color if net_profit > 0 else down_color
+                    va = 'bottom' if offset_dir < 0 else 'top'
+                    profit_texts.append((float(x[idx]), float(y_pos), profit_text, text_color, va))
+
+            for marker, pts in trade_groups.items():
+                xs, ys, cs = zip(*pts)
+                ax.scatter(xs, ys, marker=marker, s=80, c=cs,
+                           edgecolors='black', linewidths=0.5, zorder=6)
+
+            for tx, ty, txt, tc, va in profit_texts:
+                ax.text(tx, ty, txt, color=tc, fontsize=8,
+                        verticalalignment=va, horizontalalignment='center')
+
+            # ---------- 7. X轴标签 ----------
+            target_ticks = 10
+            step = max(1, n // target_ticks)
+            tick_positions = list(range(0, n, step))
+            if (n - 1) not in tick_positions:
+                tick_positions.append(n - 1)
+
+            tick_labels = []
+            kp_str = str(kline_period).lower()
+            fmt = '%m-%d %H:%M' if ('min' in kp_str or '分钟' in kp_str) else '%Y-%m-%d'
+            for pos in tick_positions:
+                tick_labels.append(dates.iloc[pos].strftime(fmt))
+
+            ax.set_xticks(tick_positions)
+            ax.set_xticklabels(tick_labels, rotation=30, ha='right', fontsize=9)
+
+            # ---------- 8. 图表格式 ----------
+            ax.set_title(f"{symbol} {kline_period} K线与交易记录", fontsize=16)
+            ax.set_xlabel('K线索引（按时间顺序）', fontsize=12)
+            ax.set_ylabel('价格', fontsize=12)
+            ax.grid(True, alpha=0.2, linestyle='--')
+            ax.set_xlim(-0.5, n - 0.5)
+
+            net_profit = result.get('total_net_profit', 0)
+            win_rate = result.get('win_rate', 0)
+            max_drawdown = result.get('max_drawdown_pct', 0)
+            initial_capital = result.get('initial_capital', 100000.0)
+            total_return_pct = (net_profit / initial_capital * 100) if initial_capital else 0
+            info_text = (
+                f"总收益: {net_profit:.2f} 元 ({total_return_pct:.2f}%)\n"
+                f"胜率: {win_rate:.2%}\n"
+                f"最大回撤: {max_drawdown:.2f}%"
+            )
+            ax.text(0.02, 0.98, info_text, transform=ax.transAxes, fontsize=11,
+                    verticalalignment='top',
+                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.4))
+
+            from matplotlib.lines import Line2D
+            ax.legend(handles=[
+                Line2D([0], [0], marker='^', color='w', markerfacecolor=up_color,
+                       markeredgecolor='black', markersize=8, label='开多/平空开多'),
+                Line2D([0], [0], marker='v', color='w', markerfacecolor=down_color,
+                       markeredgecolor='black', markersize=8, label='开空/平多开空'),
+                Line2D([0], [0], marker='o', color='w', markerfacecolor=down_color,
+                       markeredgecolor='black', markersize=8, label='平多'),
+                Line2D([0], [0], marker='o', color='w', markerfacecolor=up_color,
+                       markeredgecolor='black', markersize=8, label='平空'),
+            ], loc='lower right', fontsize=9, framealpha=0.7)
+
+            # 手动边距 + 低 dpi，跳过 tight_layout / bbox_inches='tight' 的二次重算
+            fig.subplots_adjust(left=0.06, right=0.98, top=0.93, bottom=0.12)
+            fig.savefig(chart_path, dpi=100)
+            plt.close(fig)
+
+            self.log(f"K线和交易图已保存到: {chart_path}")
+            return True
+
         except Exception as e:
             self.log(f"生成价格图表时出错: {str(e)}")
-            plt.close('all')  # 确保关闭所有图表
-            return False 
+            plt.close('all')
+            return False

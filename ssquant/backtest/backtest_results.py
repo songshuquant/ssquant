@@ -39,7 +39,7 @@ def _apply_trade_to_equity_state(state, trade, contract_multiplier, margin_rate)
 
     if action == '开多':
         volume = trade['volume']
-        price = trade['price']
+        price = trade.get('raw_price', trade['price'])  # v0.4.6: P&L 用真实合约原始价
         position_cost = price * volume * contract_multiplier
         margin_required = position_cost * margin_rate
         commission = trade.get('commission', 0)
@@ -57,7 +57,7 @@ def _apply_trade_to_equity_state(state, trade, contract_multiplier, margin_rate)
         volume = min(trade['volume'], state.long_pos)
         if volume <= 0:
             return
-        price = trade['price']
+        price = trade.get('raw_price', trade['price'])  # v0.4.6: P&L 用真实合约原始价
         commission = trade.get('commission', 0)
         position_value = state.long_avg_price * volume * contract_multiplier
         margin_released = position_value * margin_rate
@@ -73,7 +73,7 @@ def _apply_trade_to_equity_state(state, trade, contract_multiplier, margin_rate)
 
     elif action == '开空':
         volume = trade['volume']
-        price = trade['price']
+        price = trade.get('raw_price', trade['price'])  # v0.4.6: P&L 用真实合约原始价
         position_cost = price * volume * contract_multiplier
         margin_required = position_cost * margin_rate
         commission = trade.get('commission', 0)
@@ -91,7 +91,7 @@ def _apply_trade_to_equity_state(state, trade, contract_multiplier, margin_rate)
         volume = min(trade['volume'], state.short_pos)
         if volume <= 0:
             return
-        price = trade['price']
+        price = trade.get('raw_price', trade['price'])  # v0.4.6: P&L 用真实合约原始价
         commission = trade.get('commission', 0)
         position_value = state.short_avg_price * volume * contract_multiplier
         margin_released = position_value * margin_rate
@@ -107,7 +107,7 @@ def _apply_trade_to_equity_state(state, trade, contract_multiplier, margin_rate)
 
     elif action == '平多开空':
         volume = trade['volume']
-        price = trade['price']
+        price = trade.get('raw_price', trade['price'])  # v0.4.6: P&L 用真实合约原始价
         commission = trade.get('commission', 0)
         slippage_cost = trade.get('slippage', 0)
         state.cumulative_commission += commission
@@ -138,7 +138,7 @@ def _apply_trade_to_equity_state(state, trade, contract_multiplier, margin_rate)
 
     elif action == '平空开多':
         volume = trade['volume']
-        price = trade['price']
+        price = trade.get('raw_price', trade['price'])  # v0.4.6: P&L 用真实合约原始价
         commission = trade.get('commission', 0)
         slippage_cost = trade.get('slippage', 0)
         state.cumulative_commission += commission
@@ -171,10 +171,22 @@ def _apply_trade_to_equity_state(state, trade, contract_multiplier, margin_rate)
 def _extract_price_array(effective_data):
     """从 effective_data 提取主价格列为 np.float64 ndarray。
     K 线: close；Tick: LastPrice；报价: (Bid1+Ask1)/2。
+
+    v0.4.6：若 K 线 DataFrame 带有 _adjust_factor 列，返回的是
+    原始合约价（close / _adjust_factor），与 trades 里 raw_price 对齐，
+    避免盯市 P&L 出现复权幻觉。
     """
     cols = effective_data.columns
     if 'close' in cols:
-        return effective_data['close'].to_numpy(dtype=np.float64, copy=False)
+        arr = effective_data['close'].to_numpy(dtype=np.float64, copy=False)
+        if '_adjust_factor' in cols:
+            f = effective_data['_adjust_factor'].to_numpy(dtype=np.float64, copy=False)
+            # 全 1 等价不复权，跳过除法保持位级一致
+            if not np.allclose(f, 1.0):
+                # 用 np.where 避免 factor=0 触发 RuntimeWarning（理论上不会发生）
+                safe_f = np.where(f > 0, f, 1.0)
+                return arr / safe_f
+        return arr
     if 'LastPrice' in cols:
         return effective_data['LastPrice'].to_numpy(dtype=np.float64, copy=False)
     if 'BidPrice1' in cols and 'AskPrice1' in cols:
@@ -186,78 +198,117 @@ def _extract_price_array(effective_data):
 
 class BacktestResultCalculator:
     """回测结果计算器，负责计算交易统计、盈亏和绩效指标等"""
-    
+
     def __init__(self, logger=None):
         """初始化结果计算器
-        
+
         Args:
             logger: 日志管理器实例
         """
         self.logger = logger
         self.results = {}
-    
+
+    def _get_combined_equity_curve(self, results):
+        """获取综合权益曲线（所有数据源权益相加）"""
+        all_equity_curves = []
+
+        for key, result in results.items():
+            if isinstance(result, dict) and 'equity_curve' in result and isinstance(result['equity_curve'], pd.Series):
+                all_equity_curves.append(result['equity_curve'])
+
+        if not all_equity_curves:
+            return pd.Series(dtype=float)
+
+        if len(all_equity_curves) == 1:
+            return all_equity_curves[0]
+
+        # 使用交集：只保留所有数据源都有数据的时间点
+        common_indices = all_equity_curves[0].index
+        for curve in all_equity_curves[1:]:
+            common_indices = common_indices.intersection(curve.index)
+
+        if len(common_indices) == 0:
+            base_curve = max(all_equity_curves, key=len)
+            combined = base_curve.copy()
+            for curve in all_equity_curves:
+                if curve is not base_curve:
+                    aligned = curve.reindex(base_curve.index)
+                    combined = combined + aligned.fillna(method='ffill').fillna(method='bfill')
+            return combined
+        else:
+            combined = pd.Series(0.0, index=common_indices)
+            for curve in all_equity_curves:
+                combined = combined + curve.reindex(common_indices)
+            return combined
+
     def calculate_performance(self, results):
         """计算回测性能指标
-        
+
         Args:
             results: 回测结果字典
-        
+
         Returns:
             包含性能指标的字典
         """
         if not results:
             return {}
-            
+
         # 提取关键绩效指标
         performance = {}
-        
+
         # 如果存在多个数据源，则计算平均指标
         total_return = 0
         annual_return = 0
-        max_drawdown = 0
-        max_drawdown_pct = 0
         sharpe_ratio = 0
         win_rate = 0
         total_trades = 0
         winning_trades = 0
         losing_trades = 0
         profit_factor = 0
-        
+
         # 计数器
         count = 0
-        
+
         # 遍历所有结果
         for key, result in results.items():
             if isinstance(result, dict) and 'net_value' in result:
                 count += 1
-                
+
                 # 确保净值不小于0.0001（防止出现负净值）
                 net_value = max(0.0001, result.get('net_value', 1.0))
                 result['net_value'] = net_value  # 修正结果中的净值
-                
+
                 # 累加绩效指标
                 total_return += (net_value - 1.0) * 100  # 转换为百分比
                 annual_return += result.get('annual_return', 0)
-                max_drawdown += result.get('max_drawdown', 0)
-                max_drawdown_pct += result.get('max_drawdown_pct', 0)
                 sharpe_ratio += result.get('sharpe_ratio', 0)
                 win_rate += result.get('win_rate', 0) * 100  # 转换为百分比
-                
+
                 # 累加交易统计
                 total_trades += result.get('total_trades', 0)
                 winning_trades += result.get('win_trades', 0)
                 losing_trades += result.get('loss_trades', 0)
                 profit_factor += result.get('profit_factor', 0)
-        
+
+        # 基于综合权益曲线计算最大回撤（而非单品种平均）
+        combined_equity = self._get_combined_equity_curve(results)
+        if not combined_equity.empty and combined_equity.max() > 0:
+            combined_equity = combined_equity.clip(lower=0.01)
+            cummax = combined_equity.cummax()
+            drawdown = cummax - combined_equity
+            performance['max_drawdown'] = drawdown.max()
+            performance['max_drawdown_pct'] = (drawdown / cummax).max() * 100
+        else:
+            performance['max_drawdown'] = 0
+            performance['max_drawdown_pct'] = 0
+
         # 计算平均值
         if count > 0:
             performance['total_return'] = total_return / count
             performance['annual_return'] = annual_return / count
-            performance['max_drawdown'] = max_drawdown / count
-            performance['max_drawdown_pct'] = max_drawdown_pct / count
             performance['sharpe_ratio'] = sharpe_ratio / count
             performance['win_rate'] = win_rate / count
-            
+
             # 交易统计
             trade_stats = {
                 'total_trades': total_trades,
@@ -266,15 +317,15 @@ class BacktestResultCalculator:
                 'profit_factor': profit_factor / count if count > 0 else 0
             }
             performance['trade_stats'] = trade_stats
-        
+
         # 添加性能指标到结果中
         results['performance'] = performance
-        
+
         return performance
-    
+
     def log(self, message):
         """记录日志
-        
+
         Args:
             message: 日志消息
         """
@@ -282,19 +333,19 @@ class BacktestResultCalculator:
             self.logger.log_message(message)
         else:
             print(message)
-    
+
     def calculate_results(self, multi_data_source, symbol_configs):
         """计算回测结果
-        
+
         Args:
             multi_data_source: 多数据源实例
             symbol_configs: 品种配置字典
-            
+
         Returns:
             results: 回测结果字典
         """
         results = {}
-        
+
         # 资金分配：统计每个品种的 initial_capital 和对应的数据源数量
         num_data_sources = len(multi_data_source.data_sources)
         _symbol_ds_info = {}
@@ -307,7 +358,7 @@ class BacktestResultCalculator:
         # 判断分配模式：所有品种 initial_capital 相同 → 共享总资金均分；不同 → 按品种独立分配
         _unique_capitals = set(v['capital'] for v in _symbol_ds_info.values())
         _shared_capital_mode = len(_unique_capitals) == 1 and num_data_sources > 1
-        
+
         # 遍历所有数据源
         for ds_idx, ds in enumerate(multi_data_source.data_sources):
             # 获取交易记录
@@ -315,14 +366,14 @@ class BacktestResultCalculator:
             result_end_idx = int(getattr(ds, 'result_end_idx', len(ds.data)) or 0)
             result_end_idx = max(0, min(result_end_idx, len(ds.data)))
             effective_data = ds.data.iloc[:result_end_idx] if result_end_idx > 0 else ds.data.iloc[0:0]
-            
+
             if not trades:
                 self.log(f"数据源 #{ds_idx} ({ds.symbol} {ds.kline_period}) 没有交易记录")
                 continue
             if effective_data.empty:
                 self.log(f"数据源 #{ds_idx} ({ds.symbol} {ds.kline_period}) 没有可用于生成报告的回测区间")
                 continue
-            
+
             # 获取品种配置
             symbol_config = symbol_configs.get(ds.symbol, {
                 'commission': 0.0003,  # 手续费率
@@ -344,17 +395,17 @@ class BacktestResultCalculator:
                     initial_capital = raw_capital / _symbol_ds_info[ds.symbol]['count']
                 else:
                     initial_capital = raw_capital
-            
+
             # 获取固定金额手续费（元/手）
             commission_per_lot = symbol_config.get('commission_per_lot', 0)
             commission_close_per_lot = symbol_config.get('commission_close_per_lot', 0)
             commission_close_today_per_lot = symbol_config.get('commission_close_today_per_lot', 0)
-            
+
             # 判断手续费计算方式：
             # - 如果费率 > 1e-05（有意义的费率），则使用费率计算（如螺纹钢 0.000101）
             # - 如果费率 ≈ 1e-06（无意义占位符）且固定金额 > 0，则使用固定金额（如黄金 10元/手）
             use_fixed_commission = commission_rate < 1e-05 and commission_per_lot > 0.1
-            
+
             # ===== 基于均价跟踪计算每笔交易的盈亏（支持加仓/部分平仓/复合反手） =====
             _long_pos = 0
             _long_avg_price = 0.0
@@ -371,7 +422,7 @@ class BacktestResultCalculator:
 
             for trade in trades:
                 action = trade['action']
-                price = trade['price']
+                price = trade.get('raw_price', trade['price'])  # v0.4.6: P&L 用真实合约原始价
                 volume = trade['volume']
                 _slippage_per_unit = trade.get('slippage_cost', 0)
 
@@ -540,23 +591,23 @@ class BacktestResultCalculator:
             win_trades = sum(1 for t in trades if t.get('net_profit', 0) > 0 and t['action'] in _close_actions)
             loss_trades = sum(1 for t in trades if t.get('net_profit', 0) < 0 and t['action'] in _close_actions)
             win_rate = win_trades / (win_trades + loss_trades) if (win_trades + loss_trades) > 0 else 0
-            
+
             total_points_profit = sum(t.get('points_profit', 0) for t in trades)
             total_amount_profit = sum(t.get('amount_profit', 0) for t in trades)
             total_commission = sum(t.get('commission', 0) for t in trades)
             total_slippage = sum(t.get('slippage', 0) for t in trades)
             total_net_profit = sum(t.get('net_profit', 0) for t in trades)
-            
+
             _total_win_pnl = sum(t.get('net_profit', 0) for t in trades if t.get('net_profit', 0) > 0 and t['action'] in _close_actions)
             _total_loss_pnl = abs(sum(t.get('net_profit', 0) for t in trades if t.get('net_profit', 0) < 0 and t['action'] in _close_actions))
             avg_win = _total_win_pnl / win_trades if win_trades > 0 else 0
             avg_loss = -(_total_loss_pnl / loss_trades) if loss_trades > 0 else 0
-            
+
             if _total_loss_pnl > 0:
                 profit_factor = _total_win_pnl / _total_loss_pnl
             else:
                 profit_factor = float('inf') if _total_win_pnl > 0 else 0
-            
+
             # ===== P10：双指针 + ndarray 增量推进权益曲线（O(B+T)，原 O(B×T²)） =====
             equity_arr, gross_equity_arr = self._calc_equity_curve_fast(
                 effective_data, trades, initial_capital,
@@ -591,28 +642,28 @@ class BacktestResultCalculator:
 
             equity_curve = pd.Series(equity_arr, index=effective_data.index, dtype=float)
             gross_equity_curve = pd.Series(gross_equity_arr, index=effective_data.index, dtype=float)
-            
+
             # 计算期末权益和净值
             final_equity = equity_curve.iloc[-1] if not equity_curve.empty else initial_capital
             gross_final_equity = gross_equity_curve.iloc[-1] if not gross_equity_curve.empty else initial_capital
-            
+
             # 确保期末权益不小于0.01（为了避免负净值）
             final_equity = max(0.01, final_equity)
             gross_final_equity = max(0.01, gross_final_equity)
-            
+
             net_value = final_equity / initial_capital
-            
+
             # 重新计算利润指标，确保与权益曲线一致
             # 净利润 = 期末权益 - 初始资金（基于 equity_curve，已扣除手续费和滑点）
             total_net_profit = final_equity - initial_capital
             # 毛利润 = 净利润 + 手续费 + 滑点（完全不含任何成本的原始盈亏）
             total_amount_profit = total_net_profit + total_commission + total_slippage
-            
+
             # 计算最大回撤（使用修改后的权益曲线）
             if not equity_curve.empty and equity_curve.max() > 0:
                 # 对权益曲线进行修正，不允许出现负值
                 equity_curve = equity_curve.clip(lower=0.01)
-                
+
                 cummax = equity_curve.cummax()
                 drawdown = (cummax - equity_curve)
                 max_drawdown = drawdown.max()
@@ -620,24 +671,24 @@ class BacktestResultCalculator:
             else:
                 max_drawdown = 0
                 max_drawdown_pct = 0
-            
+
             # 计算年化收益率和夏普比率
             # 先将权益曲线按日聚合，避免不同K线周期导致的计算偏差
             annual_return = 0
             sharpe_ratio = 0
-            
+
             if not equity_curve.empty and len(equity_curve) > 1:
                 # 将权益曲线按日聚合（取每日最后一个值）
                 equity_with_date = pd.Series(equity_curve.values, index=effective_data.index[:len(equity_curve)])
                 daily_equity = equity_with_date.resample('D').last().dropna()
-                
+
                 if len(daily_equity) > 1:
                     # 计算日收益率（百分比形式）
                     daily_returns = daily_equity.pct_change().dropna()
-                    
+
                     # 计算实际交易天数
                     actual_trading_days = len(daily_equity)
-                    
+
                     # 年化收益率：(期末/期初)^(250/交易天数) - 1
                     if actual_trading_days > 0 and daily_equity.iloc[0] > 0:
                         total_return = (daily_equity.iloc[-1] / daily_equity.iloc[0]) - 1
@@ -645,11 +696,11 @@ class BacktestResultCalculator:
                         years = actual_trading_days / 250
                         if years > 0:
                             annual_return = (total_return / years) * 100
-                    
+
                     # 夏普比率：(日收益率均值 - 无风险日利率) / 日收益率标准差 * √250
                     # 假设无风险年利率为3%
                     risk_free_daily = 0.03 / 250
-                    
+
                     if len(daily_returns) > 0 and daily_returns.std() > 0:
                         excess_return = daily_returns.mean() - risk_free_daily
                         sharpe_ratio = excess_return / daily_returns.std() * np.sqrt(250)
@@ -657,7 +708,7 @@ class BacktestResultCalculator:
                     # 只有一天数据，无法计算
                     annual_return = 0
                     sharpe_ratio = 0
-            
+
             # 保存结果
             ds_results = {
                 'symbol': ds.symbol,
@@ -688,11 +739,11 @@ class BacktestResultCalculator:
                 'equity_curve': equity_curve,
                 'gross_equity_curve': gross_equity_curve  # 毛利润曲线（不扣除成本）
             }
-            
+
             # 添加到结果字典
             key = f"{ds.symbol}_{ds.kline_period}_{'不复权' if ds.adjust_type == '0' else '后复权'}"
             results[key] = ds_results
-            
+
             # 打印结果摘要
             self.log(f"\n数据源 #{ds_idx} ({ds.symbol} {ds.kline_period}) 回测结果:")
             self.log(f"总交易次数: {total_trades}")
@@ -712,13 +763,13 @@ class BacktestResultCalculator:
             self.log(f"最大回撤: {max_drawdown:.2f} ({max_drawdown_pct:.2f})")
             self.log(f"年化收益率: {annual_return:.2f}%")
             self.log(f"夏普比率: {sharpe_ratio:.2f}")
-            
+
             # 打印交易明细
             self.log("\n交易明细:")
             for j, trade in enumerate(trades):
                 trade_time = trade['datetime']
                 action = trade['action']
-                price = trade['price']
+                price = trade.get('raw_price', trade['price'])  # v0.4.6: P&L 用真实合约原始价
                 volume = trade['volume']
                 points_profit = trade.get('points_profit', 0)
                 amount_profit = trade.get('amount_profit', 0)
@@ -726,15 +777,15 @@ class BacktestResultCalculator:
                 net_profit = trade.get('net_profit', 0)
                 roi = trade.get('roi', 0)
                 reason = trade.get('reason', '')
-                
+
                 # 只打印平仓交易的盈亏
                 if action in ['平多', '平空', '平多开空', '平空开多']:
                     profit_info = f" 点数盈亏:{points_profit:.2f} 金额盈亏:{amount_profit:.2f} 手续费:{commission:.2f} 净盈亏:{net_profit:.2f} ROI:{roi:.2f}%"
                 else:
                     profit_info = f" 手续费:{commission:.2f}"
-                
+
                 self.log(f"{j+1}. {trade_time} {action} {volume}手 价格:{price:.2f}{profit_info}")
-        
+
         self.results = results
         return results
 
@@ -843,6 +894,11 @@ class BacktestResultCalculator:
             row = effective_data.iloc[i]
             if 'close' in row:
                 current_price = row['close']
+                # v0.4.6：盯市 P&L 用原始合约价
+                if '_adjust_factor' in row:
+                    f = float(row['_adjust_factor']) if pd.notna(row['_adjust_factor']) else 1.0
+                    if f > 0 and abs(f - 1.0) > 1e-12:
+                        current_price = current_price / f
             elif 'LastPrice' in row:
                 current_price = row['LastPrice']
             elif 'BidPrice1' in row and 'AskPrice1' in row:
@@ -857,7 +913,7 @@ class BacktestResultCalculator:
                 action = trade['action']
                 if action == '开多':
                     volume = trade['volume']
-                    price = trade['price']
+                    price = trade.get('raw_price', trade['price'])  # v0.4.6: P&L 用真实合约原始价
                     position_cost = price * volume * contract_multiplier
                     margin_required = position_cost * margin_rate
                     commission = trade.get('commission', 0)
@@ -876,7 +932,7 @@ class BacktestResultCalculator:
                     if volume <= 0:
                         trades_to_remove.append(trade)
                         continue
-                    price = trade['price']
+                    price = trade.get('raw_price', trade['price'])  # v0.4.6: P&L 用真实合约原始价
                     commission = trade.get('commission', 0)
                     position_value = long_avg_price * volume * contract_multiplier
                     margin_released = position_value * margin_rate
@@ -892,7 +948,7 @@ class BacktestResultCalculator:
 
                 elif action == '开空':
                     volume = trade['volume']
-                    price = trade['price']
+                    price = trade.get('raw_price', trade['price'])  # v0.4.6: P&L 用真实合约原始价
                     position_cost = price * volume * contract_multiplier
                     margin_required = position_cost * margin_rate
                     commission = trade.get('commission', 0)
@@ -911,7 +967,7 @@ class BacktestResultCalculator:
                     if volume <= 0:
                         trades_to_remove.append(trade)
                         continue
-                    price = trade['price']
+                    price = trade.get('raw_price', trade['price'])  # v0.4.6: P&L 用真实合约原始价
                     commission = trade.get('commission', 0)
                     position_value = short_avg_price * volume * contract_multiplier
                     margin_released = position_value * margin_rate
@@ -927,7 +983,7 @@ class BacktestResultCalculator:
 
                 elif action == '平多开空':
                     volume = trade['volume']
-                    price = trade['price']
+                    price = trade.get('raw_price', trade['price'])  # v0.4.6: P&L 用真实合约原始价
                     commission = trade.get('commission', 0)
                     slippage_cost = trade.get('slippage', 0)
                     cumulative_commission += commission
@@ -958,7 +1014,7 @@ class BacktestResultCalculator:
 
                 elif action == '平空开多':
                     volume = trade['volume']
-                    price = trade['price']
+                    price = trade.get('raw_price', trade['price'])  # v0.4.6: P&L 用真实合约原始价
                     commission = trade.get('commission', 0)
                     slippage_cost = trade.get('slippage', 0)
                     cumulative_commission += commission
@@ -1013,19 +1069,19 @@ class BacktestResultCalculator:
 
     def get_summary(self, results=None):
         """获取回测结果摘要
-        
+
         Args:
             results: 回测结果字典，如果为None则使用内部结果
-            
+
         Returns:
             summary: 回测结果摘要DataFrame
         """
         if results is None:
             results = self.results
-            
+
         if not results:
             return None
-        
+
         summary_data = []
         for key, result in results.items():
             if not isinstance(result, dict) or 'symbol' not in result:
@@ -1051,12 +1107,12 @@ class BacktestResultCalculator:
                 '年化收益率': result.get('annual_return', 0),
                 '夏普比率': result.get('sharpe_ratio', 0)
             })
-        
+
         return pd.DataFrame(summary_data)
-    
+
     def get_results(self):
         """获取回测结果字典
-        
+
         Returns:
             results: 回测结果字典
         """

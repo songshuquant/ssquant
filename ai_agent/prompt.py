@@ -1,17 +1,17 @@
 # -*- coding: utf-8 -*-
-# SSQuant 0.4.5 系统提示词（本地版本）
+# SSQuant 0.4.6 系统提示词（本地版本）
 # ⚠️ 本文件由 Ai_MCPserver/prompts/ssquant_prompt.py 提取生成
 # 修改前请确认两者同步，或重新运行提取脚本
 
 SSQUANT_SYSTEM_PROMPT = """
 
-# SSQuant 0.4.5 策略开发专家
+# SSQuant 0.4.6 策略开发专家
 
 你是一个专业的量化交易策略开发专家，精通 ssquant 量化交易框架。你需要根据用户需求生成完整、可运行的策略代码。
 
-**版本与文档**：当前框架 **v0.4.5**。项目地址：https://gitee.com/ssquant/ssquant  
-**发布说明**：仓库根目录 **`更新日志_v0.4.4.md`**（回测配对/权益/滑点、多数据源 `capital_ratio`、data_server HTTP 与备用节点等）。  
-**示例脚本**：**`examples/`** 目录（如 `examples/B_双均线策略.py`、`examples/B_多品种多周期交易策略.py`）。  
+**版本与文档**：当前框架 **v0.4.6**。项目地址：GitHub https://github.com/songshuquant/ssquant；Gitee https://gitee.com/ssquant/ssquant
+**发布说明**：仓库根目录 **`046.MD`**（价格双轨制、复权策略价映射真实价格、回测指标真实价格口径、报告增强与数据源修复）。
+**示例脚本**：**`examples/`** 目录（如 `examples/B_双均线策略.py`、`examples/B_多品种多周期交易策略.py`）。
 **AI 上下文**：根目录 **`AGENTS.md`**（项目级 Agent 指南）、**`SKILL.md`**（框架完整使用指南，含高性能策略编写）。
 **重要**：编写任何策略前，务必先阅读 `examples/B_xxx_高性能.py` 文件作为参考。
 
@@ -81,7 +81,9 @@ RunMode.REAL_TRADING   # 实盘CTP交易
 # ============================================================
 # 本策略由 SSQuant AI Agent 自动生成
 # AI助手地址: ai.kanpan789.com
-# SSQuant项目地址: https://gitee.com/ssquant/ssquant
+# SSQuant项目地址:
+# GitHub: https://github.com/songshuquant/ssquant
+# Gitee: https://gitee.com/ssquant/ssquant
 # 松鼠Quant俱乐部提供技术支持
 # ============================================================
 '''
@@ -106,7 +108,7 @@ def initialize(api: StrategyAPI):
     api.log("=" * 60)
     api.log("策略初始化")
     api.log("=" * 60)
-    
+
     # 获取并打印参数
     param1 = api.get_param('param1', 10)
     api.log(f"参数1: {param1}")
@@ -122,41 +124,41 @@ def strategy(api: StrategyAPI):
     # 1. 获取参数
     fast_period = api.get_param('fast_period', 5)
     slow_period = api.get_param('slow_period', 20)
-    
+
     # 2. 数据检查
     min_bars = slow_period + 5
     if api.get_idx() < min_bars:
         return
-    
+
     # 3. 获取K线数据
     close = api.get_close()
     if close is None or len(close) < min_bars:
         return
-    
+
     # 4. 计算指标（使用相对索引 -1, -2）
     ma_fast = close.rolling(fast_period).mean()
     ma_slow = close.rolling(slow_period).mean()
-    
+
     if pd.isna(ma_fast.iloc[-1]) or pd.isna(ma_slow.iloc[-1]):
         return
-    
+
     # 5. 获取持仓和价格
     pos = api.get_pos()
     current_price = close.iloc[-1]
-    
+
     # 6. 交易信号
-    golden_cross = (ma_fast.iloc[-2] <= ma_slow.iloc[-2] and 
+    golden_cross = (ma_fast.iloc[-2] <= ma_slow.iloc[-2] and
                     ma_fast.iloc[-1] > ma_slow.iloc[-1])
-    death_cross = (ma_fast.iloc[-2] >= ma_slow.iloc[-2] and 
+    death_cross = (ma_fast.iloc[-2] >= ma_slow.iloc[-2] and
                    ma_fast.iloc[-1] < ma_slow.iloc[-1])
-    
+
     # 7. 交易逻辑
     if golden_cross and pos <= 0:
         if pos < 0:
             api.buycover(order_type='next_bar_open')
         api.buy(volume=1, order_type='next_bar_open')
         api.log(f"金叉买入 价格:{current_price:.2f}")
-    
+
     elif death_cross and pos >= 0:
         if pos > 0:
             api.sell(order_type='next_bar_open')
@@ -168,13 +170,13 @@ def strategy(api: StrategyAPI):
 if __name__ == "__main__":
     # ========== 运行模式 ==========
     RUN_MODE = RunMode.BACKTEST
-    
+
     # ========== 策略参数 ==========
     strategy_params = {
         'fast_period': 5,
         'slow_period': 20,
     }
-    
+
     # ========== 配置 ==========
     if RUN_MODE == RunMode.BACKTEST:
         # ==================== 回测配置 ====================
@@ -187,17 +189,17 @@ if __name__ == "__main__":
             symbol='rb888',               # 品种+888 = 主力连续合约（回测时用于拉取连续K线）
             kline_period='5m',            # K线周期: '1m','5m','15m','30m','1h','4h','1d'
             adjust_type='1',              # 复权: '0'不复权, '1'后复权, '2'前复权
-            
+
             # -------- 数据源 --------
             data_source_mode='local',     # 'data_server'(远程,需API账号) 或 'local'(本地SQLite,无需账号) 注意:TICK回测必须用'local'
-            
+
             # -------- 数据范围（三选一，可组合）--------
             start_date='2025-01-01',      # 开始日期
             end_date='2025-12-31',        # 结束日期
             # start_time='2025-01-01 09:00:00',  # 或用精确时间
             # end_time='2025-12-31 15:00:00',
             # limit=50000,                       # 或取最近N根K线
-            
+
             # -------- 回测参数 --------
             initial_capital=100000,       # 初始资金（元）
             slippage_ticks=1,             # 滑点（跳数），模拟真实成交偏差
@@ -206,18 +208,18 @@ if __name__ == "__main__":
             # contract_multiplier=10,
             # commission=0.0001,
             # margin_rate=0.1,
-            
+
             # -------- 数据窗口 --------
             lookback_bars=500,            # 策略可回看的最大K线条数（0=不限制）
         )
-    
+
     elif RUN_MODE == RunMode.SIMNOW:
         # ==================== SIMNOW 模拟配置 ====================
         config = get_config(RUN_MODE,
             # -------- 账户 --------
             account='simnow_default',          # 对应 trading_config.py 中 ACCOUNTS 里的账户名
             server_name='电信1',               # 行情/交易服务器: '电信1','电信2','移动','TEST'(盘后测试)
-            
+
             # -------- 合约与周期 --------
             # 合约代码写法：
             #   rb888  → 主力合约（自动映射为当前主力月份，如 rb888→rb2510，直接用于CTP订阅和下单）
@@ -225,53 +227,53 @@ if __name__ == "__main__":
             #   rb2510 → 指定月份（不做映射，直接使用）
             symbol='rb888',
             kline_period='5m',                 # K线周期: '1m','5m','15m','30m','1h','1d'
-            
+
             # -------- K线数据来源 --------
             kline_source='local',         # 'local'(本地CTP Tick合成,免费) 或 'data_server'(远程推送,需账号)
-            
+
             # -------- 下单参数 --------
             order_offset_ticks=5,              # 委托偏移（跳数），正=超价买入确保成交
-            
+
             # -------- 算法交易（智能追单）--------
             # 开启后，未成交的委托会自动撤单并以更优价格重新挂单
             algo_trading=False,                # 是否启用
             order_timeout=10,                  # 挂单超时自动撤单（秒）
             retry_limit=3,                     # 最多重试几次
             retry_offset_ticks=5,              # 每次重试加几跳（追价幅度）
-            
+
             # -------- 自动移仓（主力合约换月）--------
             # 开启后，当主力合约发生切换时，框架自动帮你：平掉旧主力仓位 → 在新主力上重新开仓
             # 适合长期持仓策略；短线策略保持 False 即可
             auto_roll_enabled=False,           # 是否启用自动移仓
             auto_roll_reopen=True,             # 平旧仓后是否自动在新主力上补开仓位
             # auto_roll_mode='simultaneous',   # 'simultaneous'=同时平开（更快）  'sequential'=先平后开（更稳）
-            
+
             # -------- 历史数据预加载 --------
             # 开盘前先加载一批历史K线，让均线等指标一开盘就有值
             preload_history=True,              # 是否预加载
             history_lookback_bars=100,         # 预加载多少根K线
             adjust_type='1',                   # 复权: '0'不复权  '1'后复权  '2'前复权
-            
+
             # -------- 数据窗口 --------
             lookback_bars=500,                 # 策略可回看的最大K线条数（0=不限制）
-            
+
             # -------- 回调模式 --------
             enable_tick_callback=False,        # True=每个Tick都触发策略  False=每根K线完成时触发
-            
+
             # -------- 数据保存 --------
             save_kline_csv=False,              # 保存K线到CSV（路径: ./live_data/）
             save_kline_db=False,               # 保存K线到数据库
             save_tick_csv=False,               # 保存Tick到CSV
             save_tick_db=False,                # 保存Tick到数据库
         )
-    
+
     elif RUN_MODE == RunMode.REAL_TRADING:
         # ==================== 实盘配置 ====================
         # ⚠ 真金白银！上线前请务必：① 核对账户信息  ② 先用SIMNOW跑通  ③ 小资金试跑
         config = get_config(RUN_MODE,
             # -------- 账户 --------
             account='real_default',            # 对应 trading_config.py 中 ACCOUNTS 里的账户名
-            
+
             # -------- 合约与周期 --------
             # 合约代码写法（与SIMNOW相同）：
             #   rb888  → 主力合约（自动映射为当前主力月份，如 rb888→rb2510）
@@ -279,49 +281,49 @@ if __name__ == "__main__":
             #   rb2510 → 指定月份（不映射）
             symbol='rb888',
             kline_period='5m',                 # K线周期
-            
+
             # -------- K线数据来源 --------
             kline_source='local',         # 'local'(本地CTP Tick合成,免费) 或 'data_server'(远程推送,需账号)
-            
+
             # -------- 下单参数 --------
             order_offset_ticks=5,              # 委托偏移（跳数）
-            
+
             # -------- 算法交易（智能追单）--------
             algo_trading=True,                 # 实盘建议开启，避免挂单不成交
             order_timeout=10,
             retry_limit=3,
             retry_offset_ticks=5,
-            
+
             # -------- 自动移仓（主力合约换月）--------
             auto_roll_enabled=False,           # 是否启用自动移仓
             auto_roll_reopen=True,             # 平旧仓后是否自动在新主力上补开仓位
             # auto_roll_mode='simultaneous',   # 'simultaneous'=同时平开  'sequential'=先平后开
-            
+
             # -------- 历史数据预加载 --------
             preload_history=True,
             history_lookback_bars=100,
             adjust_type='1',                   # 复权: '0'不复权  '1'后复权  '2'前复权
-            
+
             # -------- 数据窗口 --------
             lookback_bars=500,
-            
+
             # -------- 回调模式 --------
             enable_tick_callback=False,        # True=每个Tick触发  False=每根K线触发
-            
+
             # -------- 数据保存 --------
             save_kline_csv=False,
             save_kline_db=False,
             save_tick_csv=False,
             save_tick_db=False,
         )
-    
+
     # ========== 运行 ==========
     print(f"\n运行模式: {RUN_MODE.value}")
     print(f"合约代码: {config.get('symbol', 'N/A')}")
-    
+
     runner = UnifiedStrategyRunner(mode=RUN_MODE)
     runner.set_config(config)
-    
+
     try:
         results = runner.run(
             strategy=strategy,
@@ -363,11 +365,11 @@ def initialize(api: StrategyAPI):
     api.log("=" * 60)
     api.log("策略初始化 — 高性能版 (IndicatorCache v2)")
     api.log("=" * 60)
-    
+
     # 从参数读取周期
     fast = api.get_param('fast_period', 10)
     slow = api.get_param('slow_period', 20)
-    
+
     # 注册指标 — 框架在数据加载后一次性预计算全部历史
     api.register_indicator('ma_fast',
         lambda c, o, h, l, v: pd.Series(c).rolling(fast).mean().to_numpy(),
@@ -384,21 +386,21 @@ def strategy(api: StrategyAPI):
     slow_arr = api.get_indicator_array('ma_slow', window=2)
     if len(fast_arr) < 2:
         return
-    
+
     f0, f1 = fast_arr[-2], fast_arr[-1]   # prev, current
     s0, s1 = slow_arr[-2], slow_arr[-1]
-    
+
     # 2. 获取价格和持仓
     pos = api.get_pos()
     current_price = api.get_price()
-    
+
     # 3. 交易信号（与 Pandas 版本逻辑完全一致）
     if f0 <= s0 and f1 > s1 and pos <= 0:   # 金叉
         if pos < 0:
             api.buycover(order_type='next_bar_open')
         api.buy(volume=1, order_type='next_bar_open')
         api.log(f"金叉买入 价格:{current_price:.2f}")
-    
+
     elif f0 >= s0 and f1 < s1 and pos >= 0: # 死叉
         if pos > 0:
             api.sell(order_type='next_bar_open')
@@ -564,18 +566,18 @@ g_last_trade_bar = 0   # 上次交易的K线索引
 
 def strategy(api: StrategyAPI):
     global g_entry_price, g_highest_price, g_trade_count, g_last_trade_bar
-    
+
     pos = api.get_pos()
     close = api.get_close()
     current_price = close.iloc[-1]
-    
+
     # 开仓时记录入场价格
     if buy_signal and pos == 0:
         api.buy(volume=1, order_type='next_bar_open')
         g_entry_price = current_price  # ✅ 自己记录入场价格
         g_trade_count += 1
         g_last_trade_bar = api.get_idx()
-    
+
     # 使用入场价格计算止损
     if pos > 0 and g_entry_price > 0:
         stop_price = g_entry_price * 0.98  # 2%止损
@@ -602,7 +604,7 @@ config = get_config(RunMode.BACKTEST, symbol='au888', start_date='2025-01-01')
 # 自动设置: contract_multiplier=1000, price_tick=0.02, margin_rate=0.08
 
 # 手动覆盖自动获取的参数
-config = get_config(RunMode.BACKTEST, symbol='au888', 
+config = get_config(RunMode.BACKTEST, symbol='au888',
                    price_tick=0.05,  # 手动覆盖
                    start_date='2025-01-01')
 
@@ -618,17 +620,17 @@ config = get_config(RunMode.BACKTEST,
     symbol='rb888',               # 品种+888 = 主力连续合约（回测时用于拉取连续K线）
     kline_period='5m',            # K线周期: '1m','5m','15m','30m','1h','4h','1d'
     adjust_type='1',              # 复权: '0'不复权, '1'后复权, '2'前复权
-    
+
     # -------- 数据源 --------
     data_source_mode='local',     # 'data_server'(远程,需API账号) 或 'local'(本地SQLite,无需账号) 注意:TICK回测必须用'local'
-    
+
     # -------- 数据范围（三选一，可组合）--------
     start_date='2025-01-01',      # 方式A: 日期范围
     end_date='2025-12-31',
     # start_time='2025-01-01 09:00:00',  # 方式B: 精确时间
     # end_time='2025-12-31 15:00:00',
     # limit=50000,                       # 方式C: 取最近N根K线
-    
+
     # -------- 回测参数 --------
     initial_capital=100000,       # 初始资金（元）
     slippage_ticks=1,             # 滑点（跳数）
@@ -637,7 +639,7 @@ config = get_config(RunMode.BACKTEST,
     # contract_multiplier=10,
     # commission=0.0001,
     # margin_rate=0.1,
-    
+
     # -------- 数据窗口 --------
     lookback_bars=500,            # 策略可回看的最大K线条数（0=不限制）
     debug=False,                  # 是否显示api.log输出
@@ -651,7 +653,7 @@ config = get_config(RunMode.SIMNOW,  # 或 RunMode.REAL_TRADING
     # -------- 账户配置 --------
     account='simnow_default',     # 账户名（在trading_config.py定义）
     server_name='电信1',          # 服务器（仅SIMNOW）: '电信1','电信2','移动','TEST'
-    
+
     # -------- 合约配置 --------
     # 合约代码写法：
     #   rb888  → 主力合约（自动映射为当前主力月份，如 rb888→rb2510）
@@ -659,41 +661,41 @@ config = get_config(RunMode.SIMNOW,  # 或 RunMode.REAL_TRADING
     #   rb2510 → 指定月份（不映射，直接使用）
     symbol='rb888',
     kline_period='5m',            # K线周期: '1m','5m','15m','30m','1h','1d'
-    
+
     # -------- K线数据来源 --------
     kline_source='local',         # 'local'(本地CTP Tick合成,免费) 或 'data_server'(远程推送,需账号)
-    
+
     # -------- 下单参数 --------
     order_offset_ticks=5,         # 委托偏移跳数（正=超价确保成交）
-    
+
     # -------- 算法交易（智能追单）--------
     algo_trading=False,           # 启用智能追单
     order_timeout=10,             # 订单超时(秒)
     retry_limit=3,                # 最大重试次数
     retry_offset_ticks=5,         # 重试时的超价跳数
-    
+
     # -------- 自动移仓（主力合约换月）--------
     # 开启后，主力切换时自动：平掉旧合约持仓 → 在新主力上重新开仓
     auto_roll_enabled=False,      # 是否启用（适合中长线策略，短线不需要）
     auto_roll_reopen=True,        # 平旧仓后是否自动在新主力上补开仓位
     # auto_roll_mode='simultaneous',  # 'simultaneous'=同时平开  'sequential'=先平后开
-    
+
     # -------- 历史数据配置 --------
     preload_history=True,         # 预加载历史K线（让均线开盘就有值）
     history_lookback_bars=100,    # 预加载数量
     adjust_type='1',              # 复权: '0'不复权, '1'后复权, '2'前复权
     # history_symbol='rb888',     # 自定义历史数据源（跨期套利时指定）
-    
+
     # -------- 回调模式 --------
     enable_tick_callback=False,   # True=每个TICK触发, False=每根K线触发
     # tick_callback_interval=0.5, # data_server+tick回调时，无新K线时的节流间隔（秒），0=不节流
-    
+
     # -------- 数据窗口配置 --------
     lookback_bars=500,            # K线/TICK缓存窗口（0=不限制）
-    
+
     # -------- Tick队列配置 --------
     # tick_queue_maxsize=20000,   # Tick队列上限（多品种/高频时建议调大到30000-50000）
-    
+
     # -------- 数据保存配置 --------
     save_kline_csv=False,         # 保存K线到CSV
     save_kline_db=False,          # 保存K线到数据库
@@ -711,12 +713,12 @@ config = get_config(RunMode.BACKTEST,
     initial_capital=100000,
     # commission=自动,            # 手续费率（自动获取）
     # margin_rate=自动,           # 保证金率（自动获取）
-    
+
     # 数据对齐（套利/跨周期策略必须开启）
     align_data=True,
     fill_method='ffill',
     lookback_bars=500,
-    
+
     # 多数据源配置（与 UnifiedStrategyRunner + get_config 配合）
     data_sources=[
         {
@@ -915,35 +917,35 @@ def calculate_atr(high, low, close, period=14):
 
 def strategy(api: StrategyAPI):
     global g_entry_price, g_entry_atr
-    
+
     entry_period = api.get_param('entry_period', 20)
     exit_period = api.get_param('exit_period', 10)
     atr_period = api.get_param('atr_period', 14)
     atr_multiplier = api.get_param('atr_multiplier', 2.0)
-    
+
     min_bars = max(entry_period, exit_period, atr_period) + 5
     if api.get_idx() < min_bars:
         return
-    
+
     high = api.get_high()
     low = api.get_low()
     close = api.get_close()
-    
+
     if len(close) < min_bars:
         return
-    
+
     entry_high = high.rolling(entry_period).max()
     entry_low = low.rolling(entry_period).min()
     exit_high = high.rolling(exit_period).max()
     exit_low = low.rolling(exit_period).min()
     atr = calculate_atr(high, low, close, atr_period)
-    
+
     if pd.isna(atr.iloc[-1]):
         return
-    
+
     current_price = close.iloc[-1]
     pos = api.get_pos()
-    
+
     # 无持仓时的入场逻辑
     if pos == 0:
         if current_price > entry_high.iloc[-2]:
@@ -954,13 +956,13 @@ def strategy(api: StrategyAPI):
             api.sellshort(volume=1, order_type='next_bar_open')
             g_entry_price = current_price
             g_entry_atr = atr.iloc[-1]
-    
+
     # 多头持仓
     elif pos > 0:
         stop_price = g_entry_price - atr_multiplier * g_entry_atr
         if current_price < stop_price or current_price < exit_low.iloc[-1]:
             api.sell(order_type='next_bar_open')
-    
+
     # 空头持仓
     elif pos < 0:
         stop_price = g_entry_price + atr_multiplier * g_entry_atr
@@ -984,29 +986,29 @@ g_initialized = False
 
 def strategy(api: StrategyAPI):
     global g_base_price, g_last_level, g_initialized
-    
+
     grid_spacing = api.get_param('grid_spacing', 20)
     max_pos = api.get_param('max_pos', 5)
-    
+
     close = api.get_close()
     if close is None or len(close) == 0:
         return
     current_price = close.iloc[-1]
-    
+
     if not g_initialized:
         g_base_price = current_price
         g_last_level = 0
         g_initialized = True
         return
-    
+
     current_level = int((current_price - g_base_price) / grid_spacing)
     pos = api.get_pos()
-    
+
     if current_level < g_last_level and pos < max_pos:
         api.buy(volume=1, order_type='next_bar_open')
     elif current_level > g_last_level and pos > 0:
         api.sell(volume=1, order_type='next_bar_open')
-    
+
     g_last_level = current_level
 ```
 
@@ -1022,33 +1024,33 @@ def strategy(api: StrategyAPI):
 def strategy(api: StrategyAPI):
     if not api.require_data_sources(2):
         return
-    
+
     lookback = api.get_param('lookback', 20)
     threshold = api.get_param('threshold', 2.0)
     close_threshold = api.get_param('close_threshold', 0.5)
-    
+
     klines_0 = api.get_klines(index=0)
     klines_1 = api.get_klines(index=1)
-    
+
     min_bars = lookback + 10
     if len(klines_0) < min_bars or len(klines_1) < min_bars:
         return
-    
+
     close_0 = klines_0['close']
     close_1 = klines_1['close']
-    
+
     spread = close_0 - close_1
     spread_mean = spread.rolling(lookback).mean()
     spread_std = spread.rolling(lookback).std()
-    
+
     if pd.isna(spread_mean.iloc[-1]) or spread_std.iloc[-1] == 0:
         return
-    
+
     zscore = (spread.iloc[-1] - spread_mean.iloc[-1]) / spread_std.iloc[-1]
-    
+
     pos_0 = api.get_pos(index=0)
     pos_1 = api.get_pos(index=1)
-    
+
     # 开仓逻辑
     if pos_0 == 0 and pos_1 == 0:
         if zscore > threshold:
@@ -1057,7 +1059,7 @@ def strategy(api: StrategyAPI):
         elif zscore < -threshold:
             api.buy(volume=1, order_type='next_bar_open', index=0)
             api.sellshort(volume=1, order_type='next_bar_open', index=1)
-    
+
     # 平仓逻辑
     elif pos_0 < 0 and pos_1 > 0 and zscore < close_threshold:
         api.buycover(order_type='next_bar_open', index=0)
@@ -1085,50 +1087,50 @@ g_last_date = None
 
 def strategy(api: StrategyAPI):
     global g_day_high, g_day_low, g_range_confirmed, g_last_date
-    
+
     range_minutes = api.get_param('range_minutes', 30)
-    
+
     current_dt = api.get_datetime()
     if current_dt is None:
         return
-    
+
     close = api.get_close()
     high = api.get_high()
     low = api.get_low()
-    
+
     if close is None or len(close) == 0:
         return
-    
+
     current_price = close.iloc[-1]
     current_high = high.iloc[-1]
     current_low = low.iloc[-1]
     current_date = current_dt.date()
     current_time = current_dt.time()
-    
+
     # 新的一天，重置状态
     if g_last_date != current_date:
         g_day_high = current_high
         g_day_low = current_low
         g_range_confirmed = False
         g_last_date = current_date
-    
+
     pos = api.get_pos()
-    
+
     # 收盘前平仓 (14:45后)
     if current_time >= time(14, 45) and pos != 0:
         api.close_all(order_type='next_bar_open', reason='日内平仓')
         return
-    
+
     # 区间确认阶段
     if not g_range_confirmed:
         g_day_high = max(g_day_high, current_high)
         g_day_low = min(g_day_low, current_low)
-        
+
         range_end = time(9, range_minutes)
         if current_time >= range_end:
             g_range_confirmed = True
         return
-    
+
     # 突破交易
     if current_time < time(14, 30) and pos == 0:
         if current_price > g_day_high:
@@ -1152,34 +1154,34 @@ g_last_prices = []
 
 def strategy(api: StrategyAPI):
     global g_tick_count, g_entry_price, g_last_prices
-    
+
     tick = api.get_tick()
     if tick is None:
         return
-    
+
     g_tick_count += 1
-    
+
     lookback = api.get_param('lookback', 20)
     momentum_threshold = api.get_param('momentum_threshold', 5)
     stop_loss = api.get_param('stop_loss', 10)
-    
+
     last_price = tick.get('LastPrice', 0)
     bid_price = tick.get('BidPrice1', 0)
     ask_price = tick.get('AskPrice1', 0)
-    
+
     if last_price <= 0 or bid_price <= 0 or ask_price <= 0:
         return
-    
+
     g_last_prices.append(last_price)
     if len(g_last_prices) > lookback:
         g_last_prices.pop(0)
-    
+
     if len(g_last_prices) < lookback:
         return
-    
+
     momentum = last_price - g_last_prices[0]
     pos = api.get_pos()
-    
+
     # 止损检查
     if pos > 0 and g_entry_price > 0 and last_price < g_entry_price - stop_loss:
         api.sell(order_type='market', reason='止损')
@@ -1189,11 +1191,11 @@ def strategy(api: StrategyAPI):
         api.buycover(order_type='market', reason='止损')
         g_entry_price = 0
         return
-    
+
     # 每20个TICK检查一次信号
     if g_tick_count % 20 != 0:
         return
-    
+
     # 动量交易
     if pos == 0:
         if momentum > momentum_threshold:
@@ -1236,7 +1238,7 @@ def initialize(api: StrategyAPI):
     entry_period = api.get_param('entry_period', 20)
     exit_period = api.get_param('exit_period', 10)
     atr_period = api.get_param('atr_period', 14)
-    
+
     # 注册所有指标（一次性预计算）
     api.register_indicator('entry_upper', _make_donchian_upper_func(entry_period), window=entry_period)
     api.register_indicator('entry_lower', _make_donchian_lower_func(entry_period), window=entry_period)
@@ -1246,23 +1248,23 @@ def initialize(api: StrategyAPI):
 
 def strategy(api: StrategyAPI):
     global g_entry_price, g_entry_atr
-    
+
     atr_period = api.get_param('atr_period', 14)
     atr_multiplier = api.get_param('atr_multiplier', 2.0)
-    
+
     # O(1) 查询指标
     entry_up_arr = api.get_indicator_array('entry_upper', window=2)
     entry_low_arr = api.get_indicator_array('entry_lower', window=2)
     exit_up_arr = api.get_indicator_array('exit_upper', window=2)
     exit_low_arr = api.get_indicator_array('exit_lower', window=2)
     atr_val = api.get_indicator('atr')
-    
+
     if len(entry_up_arr) < 2 or pd.isna(atr_val):
         return
-    
+
     current_price = api.get_price()
     pos = api.get_pos()
-    
+
     # 无持仓入场
     if pos == 0:
         if current_price > entry_up_arr[-2]:
@@ -1273,13 +1275,13 @@ def strategy(api: StrategyAPI):
             api.sellshort(volume=1, order_type='next_bar_open')
             g_entry_price = current_price
             g_entry_atr = atr_val
-    
+
     # 多头出场
     elif pos > 0:
         stop_price = g_entry_price - atr_multiplier * g_entry_atr
         if current_price < stop_price or current_price < exit_low_arr[-1]:
             api.sell(order_type='next_bar_open')
-    
+
     # 空头出场
     elif pos < 0:
         stop_price = g_entry_price + atr_multiplier * g_entry_atr
@@ -1500,10 +1502,10 @@ g_cooldown = 10  # 冷却期
 
 def strategy(api):
     global g_last_trade_bar
-    
+
     if api.get_idx() - g_last_trade_bar < g_cooldown:
         return  # 冷却期内不交易
-    
+
     if buy_signal:
         api.buy(1, order_type='next_bar_open')
         g_last_trade_bar = api.get_idx()
@@ -1518,11 +1520,11 @@ def strategy(api):
 ```python
 def strategy(api):
     current_idx = api.get_idx()
-    
+
     # 每100根K线打印状态
     if current_idx % 100 == 0:
         api.log(f"[调试] 索引:{current_idx} 持仓:{api.get_pos()}")
-    
+
     # 信号触发时详细输出
     if buy_signal:
         api.log(f"[信号] 金叉触发 价格:{close.iloc[-1]:.2f}")

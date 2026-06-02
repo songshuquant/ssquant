@@ -4,10 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SSQuant AI Agent - 量化策略智能体</title>
-    
+
     <!-- Monaco Editor - 本地化 -->
     <link rel="stylesheet" href="/static/node_modules/monaco-editor/min/vs/editor/editor.main.css">
-    
+
     <!-- Fonts - 使用系统字体（无需外部加载，更快） -->
     <style>
         /* 使用系统字体栈，无需下载 */
@@ -18,21 +18,54 @@
             --font-sans: 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
         }
     </style>
-    
+
     <!-- Favicon 避免404 -->
     <link rel="icon" href="data:,">
-    
+
     <!-- Marked for Markdown - 本地化 -->
     <script src="/static/node_modules/marked/marked.min.js"></script>
+
+    <!-- Highlight.js for 代码语法高亮 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script>
         // 安全的 marked.parse 封装（带 fallback）
+        // 自定义 renderer：转义所有原始 HTML，防止 < 被浏览器当作标签解析导致内容消失
+        const safeMarkedRenderer = (typeof marked !== 'undefined') ? new marked.Renderer() : null;
+        if (safeMarkedRenderer) {
+            safeMarkedRenderer.html = (html) => {
+                return html.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            };
+        }
+        function escapeHtmlOutsideCodeBlocks(text) {
+            if (!text) return '';
+            // 将文本按代码块分割，只对非代码块部分转义 < 和 >
+            const parts = text.split(/(```[\s\S]*?```)/g);
+            return parts.map((part, index) => {
+                if (index % 2 === 0) {
+                    // 非代码块部分：转义 < 和 >，防止被 marked.js 当作 HTML 标签
+                    return part.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                }
+                return part;
+            }).join('');
+        }
+
         function safeMarkedParse(text) {
+            if (!text) return '';
+            // 过滤思考标签（思考模式已将 reasoning_content 分离，旧数据中的 <think> 直接移除）
+            text = text.replace(/<think>[\s\S]*?<\/think>/g, '');
             if (typeof marked !== 'undefined' && marked.parse) {
-                return marked.parse(text);
+                const escaped = escapeHtmlOutsideCodeBlocks(text);
+                return marked.parse(escaped, {
+                    breaks: true,
+                    gfm: true,
+                    renderer: safeMarkedRenderer
+                });
             }
             // fallback: 简单的 markdown 转换
             if (!text) return '';
             return text
+                .replace(/[<>]/g, (m) => m === '<' ? '&lt;' : '&gt;')
                 .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code class="language-$1">$2</code></pre>')
                 .replace(/`([^`]+)`/g, '<code>$1</code>')
                 .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
@@ -44,18 +77,33 @@
                 .replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>')
                 .replace(/\n/g, '<br>');
         }
-        
+
         // ==================== 资源加载状态检查 ====================
         console.log('%c========== SSQuant AI Agent 资源加载状态 ==========', 'color: #3b82f6; font-weight: bold; font-size: 14px;');
-        
+
         // 检查 marked.js
         if (typeof marked !== 'undefined' && marked.parse) {
             console.log('%c✅ marked.js 加载成功', 'color: #10b981; font-weight: bold;', '- 版本:', marked.version || 'unknown');
         } else {
             console.log('%c❌ marked.js 加载失败 (使用 fallback)', 'color: #ef4444; font-weight: bold;');
         }
-        
+
         // 页面加载完成后检查其他资源
+        // 页面可见性检测：从后台切回前台时自动刷新状态
+        document.addEventListener('visibilitychange', function() {
+            if (document.visibilityState === 'visible') {
+                console.log('[DEBUG] 页面回到前台');
+                // 如果状态显示为等待中但控制器已丢失，说明前端状态漂移
+                if (isWaitingResponse && !currentAbortController) {
+                    console.warn('[DEBUG] 检测到状态漂移，重置 isWaitingResponse');
+                    setWaitingState(false);
+                    showToast('检测到连接异常，已重置状态', 'warning');
+                }
+                // 刷新报告列表（长时间后台可能导致列表失效）
+                refreshReports();
+            }
+        });
+
         window.addEventListener('DOMContentLoaded', function() {
             // 检查 Monaco Editor CSS
             var monacoCSS = document.querySelector('link[href*="monaco-editor"]');
@@ -64,7 +112,7 @@
             } else {
                 console.log('%c⚠️ Monaco Editor CSS 可能未加载', 'color: #f59e0b; font-weight: bold;');
             }
-            
+
             // 检查字体 CSS 变量
             var fontMono = getComputedStyle(document.documentElement).getPropertyValue('--font-mono');
             var fontSans = getComputedStyle(document.documentElement).getPropertyValue('--font-sans');
@@ -76,7 +124,7 @@
                 console.log('%c⚠️ 字体变量未设置', 'color: #f59e0b; font-weight: bold;');
             }
         });
-        
+
         // Monaco Editor 加载完成后检查
         window.addEventListener('load', function() {
             setTimeout(function() {
@@ -89,7 +137,7 @@
             }, 1000);
         });
     </script>
-    
+
     <style>
         :root {
             --bg-primary: #0a0e17;
@@ -200,7 +248,7 @@
             display: flex; flex-direction: column;
         }
         .workspace-sidebar.open { left: 0; }
-        
+
         .sidebar-overlay {
             position: fixed; top: 0; left: 0;
             width: 100vw; height: 100vh;
@@ -360,7 +408,60 @@
             overflow-x: auto; margin: 12px 0;
         }
         .message-ai .message-content pre code { background: none; padding: 0; }
-        
+
+        /* AI 思考内容样式 */
+        .ai-reasoning {
+            margin-bottom: 8px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .ai-reasoning-header {
+            padding: 6px 12px;
+            font-size: 12px;
+            color: var(--text-muted);
+            background: var(--bg-primary);
+            border-bottom: 1px solid var(--border-color);
+        }
+        .ai-reasoning-body {
+            padding: 8px 12px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            max-height: 200px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .ai-thinking-details {
+            margin-bottom: 12px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 8px 12px;
+        }
+        .ai-thinking-details summary {
+            cursor: pointer;
+            font-size: 13px;
+            color: var(--text-muted);
+            user-select: none;
+        }
+        .ai-thinking-details[open] summary {
+            margin-bottom: 8px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .ai-thinking-content {
+            font-size: 13px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
         /* 精确编辑模式状态提示 */
         .edit-status-badge {
             display: inline-flex; align-items: center; gap: 8px;
@@ -471,6 +572,33 @@
         .chat-input:focus { outline: none; border-color: var(--accent-blue); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
         .chat-input::placeholder { color: var(--text-muted); }
 
+        .attach-btn {
+            width: 36px; height: 44px; border: none;
+            background: transparent; border-radius: 12px;
+            color: var(--text-secondary); cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 18px; transition: all 0.2s; flex-shrink: 0;
+        }
+        .attach-btn:hover { color: var(--accent-blue); background: rgba(59, 130, 246, 0.1); }
+
+        .attachment-chip {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 4px 10px; background: var(--bg-card);
+            border: 1px solid var(--border-color); border-radius: 8px;
+            font-size: 12px; color: var(--text-secondary);
+            max-width: 200px;
+        }
+        .attachment-chip img {
+            width: 24px; height: 24px; object-fit: cover; border-radius: 4px;
+        }
+        .attachment-chip .attachment-name {
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .attachment-chip .attachment-remove {
+            cursor: pointer; color: var(--text-muted); font-size: 14px; line-height: 1;
+        }
+        .attachment-chip .attachment-remove:hover { color: var(--accent-red); }
+
         .send-btn {
             width: 44px; height: 44px; border: none;
             background: var(--gradient-primary);
@@ -506,7 +634,7 @@
             font-size: 13px; transition: all 0.2s;
         }
         .stop-btn:hover { background: var(--bg-hover); border-color: var(--accent-red); }
-        .stop-btn .stop-icon { 
+        .stop-btn .stop-icon {
             color: var(--accent-red); font-size: 10px;
         }
 
@@ -597,7 +725,7 @@
             display: flex; justify-content: space-between; align-items: center;
             margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border-color);
         }
-        .data-source-index { 
+        .data-source-index {
             font-size: 12px; font-weight: 600; color: var(--accent-blue);
             background: rgba(59,130,246,0.1); padding: 2px 8px; border-radius: 4px;
         }
@@ -707,6 +835,49 @@
             40% { transform: scale(1); opacity: 1; }
         }
 
+        /* Markdown 渲染样式 */
+        .message-content { line-height: 1.7; word-break: break-word; }
+        .message-content h1, .message-content h2, .message-content h3 {
+            margin: 16px 0 10px; font-weight: 600; color: var(--text-primary);
+        }
+        .message-content h1 { font-size: 18px; border-bottom: 1px solid var(--border-color); padding-bottom: 6px; }
+        .message-content h2 { font-size: 16px; }
+        .message-content h3 { font-size: 14px; }
+        .message-content p { margin: 8px 0; }
+        .message-content ul, .message-content ol { margin: 8px 0; padding-left: 20px; }
+        .message-content li { margin: 4px 0; }
+        .message-content blockquote {
+            margin: 10px 0; padding: 8px 12px;
+            border-left: 3px solid var(--accent-blue);
+            background: var(--bg-card); border-radius: 0 6px 6px 0;
+            color: var(--text-secondary);
+        }
+        .message-content code {
+            font-family: var(--font-mono); font-size: 13px;
+            background: rgba(255,255,255,0.08); padding: 2px 5px; border-radius: 4px;
+            color: #ff7b72;
+        }
+        .message-content pre {
+            margin: 12px 0; padding: 12px 16px;
+            background: var(--bg-primary); border-radius: 8px;
+            border: 1px solid var(--border-color); overflow-x: auto;
+        }
+        .message-content pre code {
+            background: transparent; padding: 0; border-radius: 0;
+            color: inherit; font-size: 13px; line-height: 1.6;
+        }
+        .message-content table {
+            width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px;
+        }
+        .message-content th, .message-content td {
+            border: 1px solid var(--border-color); padding: 8px 12px; text-align: left;
+        }
+        .message-content th { background: var(--bg-tertiary); font-weight: 600; }
+        .message-content tr:nth-child(even) { background: var(--bg-card); }
+        .message-content a { color: var(--accent-blue); text-decoration: none; }
+        .message-content a:hover { text-decoration: underline; }
+        .message-content hr { border: none; border-top: 1px solid var(--border-color); margin: 16px 0; }
+
         /* Scrollbar */
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: var(--bg-primary); }
@@ -798,7 +969,7 @@
                 <div id="editor-container"></div>
                 <div id="diff-container" style="display: none;"></div>
                 <div class="editor-actions">
-                    <button class="btn btn-success" onclick="runBacktest()">▶️ 运行回测</button>
+                    <button class="btn btn-success" onclick="runBacktest()">▶️ 运行</button>
                     <button class="btn btn-secondary" onclick="saveStrategy()">💾 保存版本</button>
                 </div>
             </div>
@@ -818,7 +989,7 @@
                         <p class="welcome-subtitle">输入你的需求，我可以帮你：</p>
                         <div class="welcome-features">
                             <div class="welcome-feature"><span class="welcome-feature-icon">📝</span><span>生成量化交易策略代码</span></div>
-                            <div class="welcome-feature"><span class="welcome-feature-icon">📊</span><span>自动回测并分析结果</span></div>
+                            <div class="welcome-feature"><span class="welcome-feature-icon">📊</span><span>自动运行并分析结果</span></div>
                             <div class="welcome-feature"><span class="welcome-feature-icon">🔧</span><span>调试和优化策略</span></div>
                             <div class="welcome-feature"><span class="welcome-feature-icon">💡</span><span>解答量化交易问题</span></div>
                         </div>
@@ -828,7 +999,7 @@
                 <div class="chat-input-area">
                     <div class="auto-toggles">
                         <div class="toggle-item" id="toggleBacktest" onclick="toggleAuto('backtest')">
-                            <span class="toggle-switch"></span><span>自动回测</span>
+                            <span class="toggle-switch"></span><span>自动运行</span>
                         </div>
                         <div class="toggle-item" id="toggleDebug" onclick="toggleAuto('debug')">
                             <span class="toggle-switch"></span><span>自动调试</span>
@@ -847,8 +1018,17 @@
                             <span>停止生成</span>
                         </button>
                     </div>
+                    <!-- 附件预览区域 -->
+                    <div id="attachmentPreview" style="display: none; flex-wrap: wrap; gap: 8px; margin-bottom: 8px;"></div>
+                    <!-- 待发送消息提示条 -->
+                    <div id="pendingMessageBar" style="display: none; margin-bottom: 8px; padding: 8px 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 8px; font-size: 13px; color: var(--text-secondary); align-items: center; justify-content: space-between;">
+                        <span id="pendingMessageText"></span>
+                        <button onclick="clearPendingMessage()" style="background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 16px; padding: 0 4px;" title="取消发送">×</button>
+                    </div>
                     <div class="chat-input-wrapper">
-                        <textarea class="chat-input" id="chatInput" 
+                        <button class="attach-btn" id="attachBtn" onclick="document.getElementById('fileInput').click()" title="上传图片或文本文件">📎</button>
+                        <input type="file" id="fileInput" style="display: none;" accept="image/*,.txt,.py,.md,.csv,.json,.log" multiple onchange="handleFileSelect(event)">
+                        <textarea class="chat-input" id="chatInput"
                                   placeholder="输入你的需求，例如：给我一个双均线策略" rows="1"></textarea>
                         <button class="send-btn" id="sendBtn" onclick="sendMessage()">➤</button>
                     </div>
@@ -858,7 +1038,7 @@
 
         <!-- Right Panel -->
         <div class="panel panel-right">
- 
+
             <div class="panel-content">
                 <div class="right-tabs">
                     <div class="right-tab active" data-tab="report" onclick="switchRightTab('report')">报告</div>
@@ -874,7 +1054,7 @@
                         <div class="report-list" id="reportList">
                             <div class="no-data">
                                 <div class="no-data-icon">📈</div>
-                                <p>暂无回测报告</p>
+                                <p>暂无运行报告</p>
                             </div>
                         </div>
                     </div>
@@ -890,8 +1070,8 @@
                     <!-- Params Tab -->
                     <div class="tab-pane" id="tabParams">
                         <div class="settings-section">
-                            <div class="settings-section-title">📊 回测参数</div>
-                            
+                            <div class="settings-section-title">📊 运行参数</div>
+
                             <!-- Strategy Mode -->
                             <div class="mode-tabs">
                                 <div class="mode-tab active" data-mode="single" onclick="switchStrategyMode('single')">单品种</div>
@@ -1001,7 +1181,7 @@
                                             </select>
                                         </div>
                                     </div>
-                                    
+
                                     <!-- 数据源配置 -->
                                     <div class="data-sources-section">
                                         <div class="data-sources-header">
@@ -1060,7 +1240,13 @@
                         </div>
 
                         <div class="settings-section">
-                            <div class="settings-section-title">📋 运行日志</div>
+                            <div class="settings-section-title" style="display: flex; justify-content: space-between; align-items: center;">
+                                <span>📋 运行日志</span>
+                                <div class="run-log-actions" id="runLogActions" style="display: none; gap: 8px;">
+                                    <button class="btn btn-danger btn-xs" onclick="stopBacktest()" title="强制停止当前策略进程">⏹ 停止</button>
+                                    <button class="btn btn-warning btn-xs" onclick="restartBacktest()" title="停止并重新运行策略">🔄 重试</button>
+                                </div>
+                            </div>
                             <div class="run-log" id="runLog">
                                 <div class="log-line info">等待启动...</div>
                             </div>
@@ -1082,8 +1268,8 @@
                 <div class="settings-grid">
                     <div class="settings-item full-width">
                         <label class="settings-label">API 接口地址 (支持 OpenAI 兼容格式)</label>
-                        <input type="text" class="settings-input" id="settingBaseUrl" 
-                               value="https://api.deepseek.com/v1" 
+                        <input type="text" class="settings-input" id="settingBaseUrl"
+                               value="https://api.deepseek.com/v1"
                                placeholder="例如: https://api.openai.com/v1">
                         <small style="color: var(--text-muted); font-size: 11px; margin-top: 4px;">
                             支持 DeepSeek、OpenAI、Claude、通义千问等兼容接口
@@ -1117,10 +1303,35 @@
                     </div>
                     <div class="settings-item full-width">
                         <label class="settings-label">额外参数 (JSON)</label>
-                        <textarea class="settings-input" id="settingExtraParams" rows="3" 
+                        <textarea class="settings-input" id="settingExtraParams" rows="3"
                                   placeholder='例如: {&quot;reasoning_effort&quot;:&quot;high&quot;} 或 {&quot;thinking&quot;:{&quot;type&quot;:&quot;enabled&quot;,&quot;budget_tokens&quot;:16000}}'></textarea>
                         <small style="color: var(--text-muted); font-size: 11px; margin-top: 4px;">
                             支持思考模式、推理强度等厂商特定参数，将直接透传给 API
+                        </small>
+                    </div>
+                    <div class="settings-item full-width">
+                        <label class="settings-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" id="settingThinkingMode" style="width: 16px; height: 16px;">
+                            <span>💭 思考模式（适配 R1/QwQ 等推理模型）</span>
+                        </label>
+                        <small style="color: var(--text-muted); font-size: 11px; margin-top: 4px;">
+                            开启后：显示模型思考过程、延长响应超时时间至10分钟、自动过滤 &lt;think&gt; 标签
+                        </small>
+                    </div>
+                    <div class="settings-item">
+                        <label class="settings-label">思考链期望长度</label>
+                        <input type="number" class="settings-input" id="settingMaxReasoning" min="0" max="16000" value="4000"
+                               placeholder="4000">
+                        <small style="color: var(--text-muted); font-size: 11px; margin-top: 4px;">
+                            写入提示词约束模型思考长度，0 表示不提示。模型是否遵守取决于厂商实现
+                        </small>
+                    </div>
+                    <div class="settings-item">
+                        <label class="settings-label">回复最大长度 (tokens)</label>
+                        <input type="number" class="settings-input" id="settingMaxTokens" min="1024" max="32000" value="8192"
+                               placeholder="8192">
+                        <small style="color: var(--text-muted); font-size: 11px; margin-top: 4px;">
+                            限制模型最终回复的最大 token 数
                         </small>
                     </div>
                 </div>
@@ -1166,7 +1377,7 @@
     <div class="modal-overlay" id="reportModal">
         <div class="modal modal-xl">
             <div class="modal-header">
-                <span class="modal-title" id="reportModalTitle">📊 回测报告</span>
+                <span class="modal-title" id="reportModalTitle">📊 运行报告</span>
                 <button class="modal-close" onclick="closeModal('reportModal')">×</button>
             </div>
             <div class="modal-content no-padding" style="height: calc(90vh - 80px);">
@@ -1177,7 +1388,7 @@
 
     <!-- Monaco Editor - 本地化 -->
     <script src="/static/node_modules/monaco-editor/min/vs/loader.js"></script>
-    
+
     <script>
         // ==================== 全局变量 ====================
         let editor = null;
@@ -1188,11 +1399,13 @@
         let previousStrategy = '';
         let previewCode = '';
         let autoSettings = { backtest: false, debug: false, iterate: false };
+        let iterationCount = 0;
         let isWaitingResponse = false;
         let currentStrategyMode = 'single';
+        let pendingMessageBox = null;  // AI 生成中时暂存的用户消息 {message, attachments}
         let autoSaveTimer = null;
         let lastSavedCode = '';
-        
+
         // 工作区管理
         let currentWorkspaceId = null;
         let workspaceList = [];
@@ -1235,10 +1448,12 @@
                 automaticLayout: true, readOnly: true, renderSideBySide: true
             });
 
-            editor.onDidChangeModelContent(() => { 
+            editor.onDidChangeModelContent(() => {
                 currentStrategy = editor.getValue();
                 // 自动保存工作区（已包含节流）
                 autoSaveWorkspace();
+                // 更新运行按钮文字
+                updateRunButtonText();
             });
             loadSettings();
             initChatScroll(); // 初始化智能滚动
@@ -1246,6 +1461,7 @@
             loadLastWorkspace().then(() => {
                 refreshReports();
                 loadHistory();
+                updateRunButtonText();
             });
         });
 
@@ -1263,7 +1479,7 @@
         function switchEditorTab(tab) {
             document.querySelectorAll('.editor-tab').forEach(t => t.classList.remove('active'));
             document.querySelector(`.editor-tab[data-tab="${tab}"]`)?.classList.add('active');
-            
+
             if (tab === 'editor') {
                 isInDiffMode = false;
                 document.getElementById('editor-container').style.display = 'block';
@@ -1301,49 +1517,52 @@
                 // 滚动到顶部
                 editor.revealLine(1);
             }
-            
+
             // 代码变化时自动保存到历史版本
             if (autoSave && code && code.length > 50) {
                 saveToHistory(code, true);
             }
+
+            // 更新运行按钮文字
+            updateRunButtonText();
         }
 
         // 精确编辑模式：设置代码并自动显示 diff 视图
         // 是否处于差异显示模式
         let isInDiffMode = false;
-        
+
         function setEditorCodeWithDiff(newCode, originalCode) {
             previousStrategy = originalCode;
             currentStrategy = newCode;
-            
-            // 始终更新主编辑器的代码（确保运行回测时使用最新代码）
+
+            // 始终更新主编辑器的代码（确保运行时使用最新代码）
             if (editor) {
                 editor.setValue(newCode);
             }
-            
+
             // 如果有差异，切换到 inline diff 模式
             if (originalCode && originalCode !== newCode) {
                 showInlineDiff(originalCode, newCode);
             }
-            
+
             // 代码变化时自动保存到历史版本
             if (newCode && newCode.length > 50) {
                 saveToHistory(newCode, true);
             }
         }
-        
+
         // 显示 inline diff（在编辑器位置显示差异）
         function showInlineDiff(oldCode, newCode) {
             isInDiffMode = true;
-            
+
             // 隐藏普通编辑器，显示 diff 容器
             document.getElementById('editor-container').style.display = 'none';
             document.getElementById('diff-container').style.display = 'block';
-            
+
             // 更新标签状态
             document.querySelectorAll('.editor-tab').forEach(t => t.classList.remove('active'));
             document.querySelector('.editor-tab[data-tab="diff"]')?.classList.add('active');
-            
+
             // 设置 diff 编辑器为 inline 模式（不是并排）
             if (diffEditor) {
                 diffEditor.updateOptions({ renderSideBySide: false });
@@ -1353,19 +1572,19 @@
                 });
             }
         }
-        
+
         // 退出 diff 模式，恢复普通编辑器
         function exitDiffMode() {
             isInDiffMode = false;
-            
+
             // 显示普通编辑器，隐藏 diff 容器
             document.getElementById('editor-container').style.display = 'block';
             document.getElementById('diff-container').style.display = 'none';
-            
+
             // 更新标签状态
             document.querySelectorAll('.editor-tab').forEach(t => t.classList.remove('active'));
             document.querySelector('.editor-tab[data-tab="editor"]')?.classList.add('active');
-            
+
             // 同步代码到普通编辑器
             if (editor) {
                 editor.setValue(currentStrategy);
@@ -1376,28 +1595,140 @@
             navigator.clipboard.writeText(editor.getValue()).then(() => showToast('代码已复制'));
         }
 
+        // ==================== 附件上传 ====================
+        let pendingAttachments = [];  // {name, type, data, mimeType}
+
+        function handleFileSelect(event) {
+            const files = Array.from(event.target.files);
+            files.forEach(file => {
+                const reader = new FileReader();
+                if (file.type.startsWith('image/')) {
+                    reader.onload = (e) => {
+                        pendingAttachments.push({
+                            name: file.name,
+                            type: 'image',
+                            data: e.target.result,
+                            mimeType: file.type
+                        });
+                        renderAttachmentPreview();
+                    };
+                    reader.readAsDataURL(file);
+                } else {
+                    reader.onload = (e) => {
+                        pendingAttachments.push({
+                            name: file.name,
+                            type: 'text',
+                            data: e.target.result,
+                            mimeType: file.type || 'text/plain'
+                        });
+                        renderAttachmentPreview();
+                    };
+                    reader.readAsText(file);
+                }
+            });
+            event.target.value = '';  // 允许重复选择同一文件
+        }
+
+        function renderAttachmentPreview() {
+            const container = document.getElementById('attachmentPreview');
+            if (!container) return;
+            if (pendingAttachments.length === 0) {
+                container.style.display = 'none';
+                container.innerHTML = '';
+                return;
+            }
+            container.style.display = 'flex';
+            container.innerHTML = pendingAttachments.map((att, idx) => {
+                const icon = att.type === 'image' ? '🖼️' : '📄';
+                const preview = att.type === 'image'
+                    ? `<img src="${att.data}" alt="">`
+                    : `<span style="font-size:16px;">${icon}</span>`;
+                return `
+                    <div class="attachment-chip">
+                        ${preview}
+                        <span class="attachment-name">${escapeHtml(att.name)}</span>
+                        <span class="attachment-remove" onclick="removeAttachment(${idx})" title="移除">✕</span>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function removeAttachment(index) {
+            pendingAttachments.splice(index, 1);
+            renderAttachmentPreview();
+        }
+
+        function clearAttachments() {
+            pendingAttachments = [];
+            renderAttachmentPreview();
+        }
+
+        function updatePendingMessageBar() {
+            const bar = document.getElementById('pendingMessageBar');
+            const text = document.getElementById('pendingMessageText');
+            if (pendingMessageBox) {
+                const msg = pendingMessageBox.message;
+                const attCount = pendingMessageBox.attachments?.length || 0;
+                const attLabel = attCount > 0 ? ` (+${attCount}个附件)` : '';
+                text.textContent = `⏳ AI 生成中，完成后将自动发送：${msg.substring(0, 60)}${msg.length > 60 ? '...' : ''}${attLabel}`;
+                bar.style.display = 'flex';
+            } else {
+                bar.style.display = 'none';
+            }
+        }
+
+        function clearPendingMessage() {
+            pendingMessageBox = null;
+            updatePendingMessageBar();
+        }
+
         // ==================== AI 聊天（流式） ====================
         let currentAbortController = null;
 
-        async function sendMessage() {
+        async function sendMessage(isAutoTrigger = false) {
             const input = document.getElementById('chatInput');
             const message = input.value.trim();
-            
-            if (!message) return;
-            if (isWaitingResponse) {
-                showToast('请等待当前对话完成', 'warning');
+            const hasAttachments = pendingAttachments.length > 0;
+
+            if (!message && !hasAttachments) return;
+
+            // AI 生成中时：将用户消息暂存到会话盒子，不立即发送（自动触发除外）
+            if (isWaitingResponse && !isAutoTrigger) {
+                if (pendingMessageBox) {
+                    showToast('已有消息在等待发送，请先取消或等待完成', 'warning');
+                    return;
+                }
+                pendingMessageBox = {
+                    message: message,
+                    attachments: pendingAttachments.slice()
+                };
+                input.value = '';
+                input.style.height = 'auto';
+                clearAttachments();
+                updatePendingMessageBar();
+                showToast('消息已加入队列，AI 生成完成后自动发送', 'info');
                 return;
+            }
+
+            // 用户手动发送时重置自动迭代计数
+            if (!isAutoTrigger) {
+                iterationCount = 0;
             }
 
             const welcomeEl = document.getElementById('welcomeMessage');
             if (welcomeEl) welcomeEl.style.display = 'none';
-            addMessage('user', message);
+
+            // 复制当前附件并清空（自动触发时不发送附件）
+            const currentAttachments = isAutoTrigger ? [] : pendingAttachments.slice();
+            if (!isAutoTrigger) clearAttachments();
+
+            addMessage('user', message || '[图片/文件]', currentAttachments);
             input.value = '';
             input.style.height = 'auto';
             setWaitingState(true);
-            
+
             // 立即保存用户消息到历史
-            chatHistory.push({ role: 'user', content: message });
+            chatHistory.push({ role: 'user', content: message || '[图片/文件]' });
             const aiMessageIndex = chatHistory.length;
             chatHistory.push({ role: 'assistant', content: '' });
 
@@ -1408,39 +1739,130 @@
             // 获取编辑器中的代码
             const editorCode = editor ? editor.getValue() : '';
             let fullResponse = '';
+            let reasoningContent = '';  // 思考内容（不累积到最终回复）
             let extractedCode = null;
             let lastCodeResult = null;  // 存储后端返回的代码处理结果
             let wasStopped = false;
             let sseBuffer = '';  // SSE数据缓冲区，处理跨chunk的数据
 
+            // 增量流式渲染：直接追加文本节点，避免频繁 innerHTML 重建和 Markdown 解析
+            const msgDiv = document.getElementById(aiMsgId);
+            const msgContentDiv = msgDiv?.querySelector('.message-content');
+            let streamingTextNode = null;
+            let reasoningDiv = null;  // 思考内容容器
+
+            function getOrCreateReasoningDiv() {
+                if (!msgDiv) return null;
+                if (!reasoningDiv) {
+                    reasoningDiv = document.createElement('div');
+                    reasoningDiv.className = 'ai-reasoning';
+                    reasoningDiv.innerHTML = '<div class="ai-reasoning-header">💭 思考中...</div><div class="ai-reasoning-body"></div>';
+                    msgDiv.insertBefore(reasoningDiv, msgContentDiv);
+                }
+                return reasoningDiv.querySelector('.ai-reasoning-body');
+            }
+
+            function appendStreamingChunk(text) {
+                if (!msgContentDiv) return;
+                if (!streamingTextNode) {
+                    msgContentDiv.innerHTML = '';  // 清除 typing indicator
+                    msgContentDiv.style.whiteSpace = 'pre-wrap';
+                    streamingTextNode = document.createTextNode('');
+                    msgContentDiv.appendChild(streamingTextNode);
+                }
+                streamingTextNode.textContent += text;
+                smartScroll();
+            }
+            function appendReasoningChunk(text) {
+                const body = getOrCreateReasoningDiv();
+                if (!body) return;
+                body.textContent += text;
+                smartScroll();
+            }
+            // 从 fullResponse 中提取 <think>...</think> 标签（某些模型把思考内容放在 content 中）
+            function extractThinkTags(text) {
+                const thinkMatches = [];
+                const thinkRegex = /<think>([\s\S]*?)<\/think>/g;
+                let match;
+                while ((match = thinkRegex.exec(text)) !== null) {
+                    thinkMatches.push(match[1]);
+                }
+                // 移除 <think> 标签后的文本
+                const cleanedText = text.replace(/<think>[\s\S]*?<\/think>/g, '');
+                return { thinkContent: thinkMatches.join('\n\n'), cleanedText };
+            }
+
+            // 思考内容完整显示，不做客户端截断（模型输出长度由提示词和 API 参数控制）
+
+            function finalizeStreaming() {
+                if (!msgContentDiv) return;
+                // 从 fullResponse 中提取 <think> 标签内容（兼容把思考放在 content 中的模型）
+                const { thinkContent, cleanedText } = extractThinkTags(fullResponse);
+                if (thinkContent) {
+                    reasoningContent += (reasoningContent ? '\n\n' : '') + thinkContent;
+                }
+                // 更新 fullResponse 为移除 <think> 后的内容
+                fullResponse = cleanedText;
+                // 构建最终 HTML（思考内容完整显示，不做截断）
+                let finalHtml = '';
+                if (reasoningContent) {
+                    finalHtml += `<details class="ai-thinking-details"><summary>💭 思考过程 (${reasoningContent.length} 字符)</summary><div class="ai-thinking-content">${escapeHtml(reasoningContent)}</div></details>`;
+                }
+                finalHtml += safeMarkedParse(fullResponse);
+                msgContentDiv.innerHTML = finalHtml;
+                msgContentDiv.style.whiteSpace = '';  // 清除流式期间的 pre-wrap，避免 Markdown 渲染后间距过大
+                streamingTextNode = null;
+                if (reasoningDiv) {
+                    reasoningDiv.remove();
+                    reasoningDiv = null;
+                }
+                highlightCodeBlocks(msgContentDiv);
+            }
+
             try {
                 currentAbortController = new AbortController();
-                
+
+                // fetch 请求 30 秒超时保护（防止浏览器后台节流导致请求永远挂起）
+                const fetchTimeout = setTimeout(() => {
+                    console.warn('[DEBUG] fetch 请求 30 秒超时，强制中止');
+                    if (currentAbortController) {
+                        currentAbortController.abort();
+                    }
+                }, 30000);
+
                 const response = await fetch('/api/chat/stream', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         message: message,
                         history: chatHistory,
-                        editor_code: editorCode  // 发送编辑器中的代码
+                        editor_code: editorCode,
+                        attachments: currentAttachments
                     }),
                     signal: currentAbortController.signal
                 });
+                clearTimeout(fetchTimeout);
 
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
                 let lastDataTime = Date.now();
                 let receivedDone = false;
 
-                // 超时检测（45秒无数据则超时）
+                // 超时检测：思考模型延长至 600 秒（10 分钟）
+                const isThinkingMode = document.getElementById('settingThinkingMode')?.checked || false;
+                const sseTimeout = isThinkingMode ? 600000 : 180000;  // 10分钟 / 3分钟
+                const stuckThreshold = isThinkingMode ? 300000 : 90000;  // 5分钟 / 1.5分钟
+                let wasTimeout = false;
                 const timeoutChecker = setInterval(() => {
                     const elapsed = Date.now() - lastDataTime;
-                    if (elapsed > 45000 && !receivedDone) {
+                    if (elapsed > sseTimeout && !receivedDone) {
                         console.warn('SSE读取超时');
+                        wasTimeout = true;
+                        finalizeStreaming();
                         updateMessageContent(aiMsgId, fullResponse + '\n\n⚠️ *响应超时，请点击"停止生成"后重试*');
                         reader.cancel();
                         clearInterval(timeoutChecker);
-                    } else if (elapsed > 20000 && !receivedDone) {
+                    } else if (elapsed > stuckThreshold && !receivedDone) {
                         showStuckButton(aiMsgId);
                     }
                 }, 5000);
@@ -1449,15 +1871,15 @@
                     while (true) {
                         const { done, value } = await reader.read();
                         if (done) break;
-                        
+
                         lastDataTime = Date.now();
                         const chunk = decoder.decode(value, { stream: true });
-                        
+
                         // 处理可能跨chunk的数据
                         sseBuffer += chunk;
                         const messages = sseBuffer.split('\n\n');
                         sseBuffer = messages.pop() || '';  // 保留不完整的最后一条
-                        
+
                         for (const message of messages) {
                             const lines = message.split('\n');
                             for (const line of lines) {
@@ -1467,27 +1889,47 @@
                                         if (!jsonStr.trim()) continue;
                                         const data = JSON.parse(jsonStr);
                                         if (data.error) {
+                                            finalizeStreaming();
                                             updateMessageContent(aiMsgId, fullResponse + `\n\n❌ 错误: ${data.error}`);
                                         }
                                         if (data.stopped) {
                                             wasStopped = true;
+                                            finalizeStreaming();
                                             updateMessageContent(aiMsgId, fullResponse + '\n\n⚠️ *生成已停止*');
                                             break;
                                         }
                                         if (data.heartbeat) {
                                             continue;
                                         }
+                                        if (data.retry) {
+                                            // 后端自动重试：清空已收内容，显示重试状态
+                                            fullResponse = '';
+                                            if (chatHistory[aiMessageIndex]) {
+                                                chatHistory[aiMessageIndex].content = '';
+                                            }
+                                            streamingTextNode = null;
+                                            if (msgContentDiv) {
+                                                msgContentDiv.innerHTML = '';
+                                                msgContentDiv.textContent = `⏳ 正在重试第 ${data.retry}/${data.max_retries} 次...${data.error ? '\n原因: ' + data.error : ''}`;
+                                                smartScroll();
+                                            }
+                                            continue;
+                                        }
+                                        if (data.reasoning) {
+                                            reasoningContent += data.reasoning;
+                                            appendReasoningChunk(data.reasoning);
+                                        }
                                         if (data.content) {
                                             fullResponse += data.content;
-                                            updateMessageContent(aiMsgId, fullResponse);
-                                            
-                                            // 实时更新聊天历史中的AI消息
+                                            appendStreamingChunk(data.content);
                                             if (chatHistory[aiMessageIndex]) {
+                                                // 历史记录中只保存正式回复，不包含思考内容
                                                 chatHistory[aiMessageIndex].content = fullResponse;
                                             }
                                         }
                                         if (data.done) {
                                             receivedDone = true;
+                                            finalizeStreaming();
                                             extractedCode = data.extracted_code;
                                             lastCodeResult = data.code_result;
                                             break;
@@ -1500,26 +1942,24 @@
                             }
                             if (wasStopped || receivedDone) break;
                         }
-                        
+
                         if (wasStopped || receivedDone) break;
                     }
                 } finally {
                     clearInterval(timeoutChecker);
                 }
-                
-                // 确保最终内容已更新到历史记录
-                if (chatHistory[aiMessageIndex]) {
-                    chatHistory[aiMessageIndex].content = fullResponse;
-                }
+
+                // 确保最终内容已渲染
+                finalizeStreaming();
 
                 // 处理代码结果
                 let codeResult = null;
-                
+
                 // 优先使用后端返回的 code_result
                 if (lastCodeResult) {
                     codeResult = lastCodeResult;
                 }
-                
+
                 // 如果后端没有提取到代码，尝试前端提取（兼容旧版）
                 if (!codeResult && !extractedCode && fullResponse && !wasStopped) {
                     extractedCode = extractCodeFromText(fullResponse);
@@ -1527,7 +1967,7 @@
                         codeResult = { type: 'full_code', code: extractedCode };
                     }
                 }
-                
+
                 // 如果只有 extractedCode，包装为 codeResult
                 if (!codeResult && extractedCode) {
                     codeResult = { type: 'full_code', code: extractedCode };
@@ -1537,23 +1977,23 @@
                 if (codeResult && codeResult.code) {
                     try {
                         const originalCode = editorCode;
-                        
+
                         if (codeResult.type === 'search_replace') {
                             // 精确编辑模式：显示 diff 预览
-                            
+
                             // 显示修改摘要
                             const appliedCount = codeResult.apply_result?.applied?.length || 0;
                             const failedCount = codeResult.apply_result?.failed?.length || 0;
-                            
+
                             // 使用简化消息函数（会添加操作按钮）
                             simplifyMessageForSearchReplace(aiMsgId, fullResponse, appliedCount, failedCount);
-                            
+
                             // 保存原始代码用于 diff 对比
                             previousStrategy = originalCode;
-                            
+
                             // 应用修改后的代码
                             setEditorCodeWithDiff(codeResult.code, originalCode);
-                            
+
                             showToast(`已应用 ${appliedCount} 处精确修改`);
                         } else {
                             // 完整代码模式：直接替换
@@ -1561,9 +2001,9 @@
                             simplifyMessageWithCode(aiMsgId, fullResponse);
                             showToast('策略代码已更新并保存');
                         }
-                        
-                        // 如果开启自动回测，则运行回测
-                        if (autoSettings.backtest) {
+
+                        // 如果开启自动运行，则运行策略（超时后不再自动触发）
+                        if (autoSettings.backtest && !wasTimeout) {
                             setTimeout(() => runBacktest(), 500);
                         }
                     } catch (codeError) {
@@ -1573,6 +2013,7 @@
                 }
 
             } catch (error) {
+                finalizeStreaming();
                 if (error.name === 'AbortError') {
                     updateMessageContent(aiMsgId, fullResponse + '\n\n⚠️ *生成已停止*');
                 } else {
@@ -1580,11 +2021,24 @@
                     updateMessageContent(aiMsgId, `❌ 请求失败: ${error.message}`);
                 }
             } finally {
+                finalizeStreaming();
                 currentAbortController = null;
                 setWaitingState(false);
-                
+
                 // 统一保存：只保存工作区（包含聊天记录和代码）
                 autoSaveWorkspace();
+
+                // AI 生成完成后，自动发送会话盒子中的待发送消息
+                if (!isAutoTrigger && pendingMessageBox) {
+                    const box = pendingMessageBox;
+                    pendingMessageBox = null;
+                    updatePendingMessageBar();
+                    // 恢复待发送内容到输入框，然后发送
+                    document.getElementById('chatInput').value = box.message;
+                    pendingAttachments = box.attachments || [];
+                    renderAttachmentPreview();
+                    setTimeout(() => sendMessage(false), 300);
+                }
             }
         }
 
@@ -1593,7 +2047,7 @@
         function showStuckButton(msgId) {
             if (stuckButtonShown) return;
             stuckButtonShown = true;
-            
+
             const msg = document.getElementById(msgId);
             if (msg) {
                 const existingBtn = msg.querySelector('.stuck-btn');
@@ -1626,14 +2080,14 @@
 
         // ==================== 智能滚动（参考ChatGPT） ====================
         let userScrolledUp = false;  // 用户是否向上滚动了
-        
+
         function initChatScroll() {
             const container = document.getElementById('chatMessages');
             container.addEventListener('scroll', () => {
                 // 检查用户是否在底部（允许50px误差）
                 const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 50;
                 userScrolledUp = !isAtBottom;
-                
+
                 // 显示/隐藏滚动到底部按钮
                 const scrollBtn = document.getElementById('scrollToBottomBtn');
                 if (scrollBtn) {
@@ -1641,7 +2095,7 @@
                 }
             });
         }
-        
+
         function smartScroll() {
             // 只有当用户在底部时才自动滚动
             if (!userScrolledUp) {
@@ -1649,7 +2103,7 @@
                 container.scrollTop = container.scrollHeight;
             }
         }
-        
+
         function scrollToBottom() {
             const container = document.getElementById('chatMessages');
             container.scrollTop = container.scrollHeight;
@@ -1658,11 +2112,20 @@
             if (scrollBtn) scrollBtn.style.display = 'none';
         }
 
-        function addMessage(role, content) {
+        function addMessage(role, content, attachments) {
             const container = document.getElementById('chatMessages');
             const div = document.createElement('div');
             div.className = `message message-${role}`;
-            div.innerHTML = `<div class="message-content">${role === 'ai' ? safeMarkedParse(content) : escapeHtml(content)}</div>`;
+            let html = `<div class="message-content">${role === 'ai' ? safeMarkedParse(content) : escapeHtml(content)}</div>`;
+            if (attachments && attachments.length > 0) {
+                html += `<div style="margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px;">`;
+                attachments.forEach(att => {
+                    const icon = att.type === 'image' ? '🖼️' : '📄';
+                    html += `<span style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 6px; font-size: 12px; color: var(--text-secondary);">${icon} ${escapeHtml(att.name)}</span>`;
+                });
+                html += `</div>`;
+            }
+            div.innerHTML = html;
             container.appendChild(div);
             smartScroll();
         }
@@ -1678,11 +2141,23 @@
             smartScroll();
         }
 
+        function highlightCodeBlocks(container) {
+            if (typeof hljs !== 'undefined' && container) {
+                container.querySelectorAll('pre code').forEach(block => {
+                    // 跳过空代码块，避免高亮后破坏结构
+                    if (!block.textContent.trim()) return;
+                    hljs.highlightElement(block);
+                });
+            }
+        }
+
         function updateMessageContent(id, content) {
             const msg = document.getElementById(id);
             if (msg) {
-                msg.querySelector('.message-content').innerHTML = safeMarkedParse(content);
+                const contentDiv = msg.querySelector('.message-content');
+                contentDiv.innerHTML = safeMarkedParse(content);
                 smartScroll();
+                highlightCodeBlocks(contentDiv);
             }
         }
 
@@ -1703,19 +2178,19 @@
         function simplifyMessageWithCode(id, fullResponse) {
             const msg = document.getElementById(id);
             if (!msg) return;
-            
+
             // 移除代码块，保留其他文字说明
             let cleanedResponse = fullResponse
                 .replace(/```python[\s\S]*?```/g, '')
                 .replace(/```py[\s\S]*?```/g, '')
                 .replace(/```[\s\S]*?```/g, '')
                 .trim();
-            
+
             // 如果移除代码后内容太少，使用默认说明
             if (cleanedResponse.length < 20) {
                 cleanedResponse = '策略代码已生成完成。';
             }
-            
+
             // 添加成功提示
             const successBadge = `
                 <div style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; margin-bottom: 12px; color: #10b981; font-size: 13px;">
@@ -1723,10 +2198,10 @@
                     <span>策略代码已生成完成！</span>
                 </div>
             `;
-            
-            // 始终显示操作按钮（不管是否开启自动回测）
+
+            // 始终显示操作按钮（不管是否开启自动运行）
             const actionButtons = getCodeActionButtons();
-            
+
             // 更新消息内容
             const contentDiv = msg.querySelector('.message-content');
             if (contentDiv) {
@@ -1738,7 +2213,7 @@
         function simplifyMessageForSearchReplace(id, fullResponse, appliedCount, failedCount) {
             const msg = document.getElementById(id);
             if (!msg) return;
-            
+
             // 移除 SEARCH/REPLACE 块，保留其他文字说明
             let cleanedResponse = fullResponse
                 .replace(/<<<<<<< SEARCH[\s\S]*?>>>>>>> REPLACE/g, '')
@@ -1746,12 +2221,12 @@
                 .replace(/```py[\s\S]*?```/g, '')
                 .replace(/```[\s\S]*?```/g, '')
                 .trim();
-            
+
             // 如果移除后内容太少，使用默认说明
             if (cleanedResponse.length < 20) {
                 cleanedResponse = '代码修改已完成。';
             }
-            
+
             // 添加精确编辑成功提示
             let statusText = `精确编辑完成：成功应用 ${appliedCount} 处修改`;
             let badgeClass = '';
@@ -1759,17 +2234,17 @@
                 statusText += `，${failedCount} 处未匹配`;
                 badgeClass = 'warning';
             }
-            
+
             const successBadge = `
                 <div class="edit-status-badge ${badgeClass}">
                     <span class="icon">${failedCount > 0 ? '⚠️' : '✅'}</span>
                     <span>${statusText}</span>
                 </div>
             `;
-            
+
             // 操作按钮
             const actionButtons = getCodeActionButtons();
-            
+
             // 更新消息内容
             const contentDiv = msg.querySelector('.message-content');
             if (contentDiv) {
@@ -1779,10 +2254,14 @@
 
         // 获取代码操作按钮（复用）
         function getCodeActionButtons() {
+            const mode = detectRunMode(currentStrategy);
+            const label = getRunModeLabel(mode);
+            const verb = getRunModeVerb(mode);
+            const btnText = mode === 'BACKTEST' ? `${verb}回测` : `${verb}${label}`;
             return `
                 <div class="ai-action-buttons" style="margin-top: 16px; display: flex; gap: 10px; flex-wrap: wrap;">
                     <button class="ai-action-btn primary" onclick="runBacktest()">
-                        <span>▶</span> 运行回测
+                        <span>▶</span> ${btnText}
                     </button>
                     <button class="ai-action-btn" onclick="askIterateStrategy()">
                         <span>🔄</span> 迭代优化
@@ -1800,15 +2279,15 @@
             if (confirm('确定清空聊天记录？')) {
                 const chatMessages = document.getElementById('chatMessages');
                 const welcomeMessage = document.getElementById('welcomeMessage');
-                
+
                 // 先保存 welcomeMessage（如果存在）
                 if (welcomeMessage) {
                     welcomeMessage.remove();
                 }
-                
+
                 // 清空聊天消息
                 chatMessages.innerHTML = '';
-                
+
                 // 重新创建欢迎消息
                 const newWelcome = document.createElement('div');
                 newWelcome.className = 'welcome-message';
@@ -1819,29 +2298,29 @@
                     <p class="welcome-subtitle">输入你的需求，我可以帮你：</p>
                     <div class="welcome-features">
                         <div class="welcome-feature"><span class="welcome-feature-icon">📝</span><span>生成量化交易策略代码</span></div>
-                        <div class="welcome-feature"><span class="welcome-feature-icon">📊</span><span>自动回测并分析结果</span></div>
+                        <div class="welcome-feature"><span class="welcome-feature-icon">📊</span><span>自动运行并分析结果</span></div>
                         <div class="welcome-feature"><span class="welcome-feature-icon">🔧</span><span>调试和优化策略</span></div>
                         <div class="welcome-feature"><span class="welcome-feature-icon">💡</span><span>解答量化交易问题</span></div>
                     </div>
                 `;
                 chatMessages.appendChild(newWelcome);
-                
+
                 // 清空历史
                 chatHistory = [];
                 showToast('聊天记录已清空');
-                
+
                 // 同步到当前工作区
                 autoSaveWorkspace();
             }
         }
 
         // ==================== 工作区管理 ====================
-        
+
         function toggleWorkspaceSidebar() {
             const sidebar = document.getElementById('workspaceSidebar');
             const overlay = document.getElementById('sidebarOverlay');
             const isOpen = sidebar.classList.contains('open');
-            
+
             if (isOpen) {
                 sidebar.classList.remove('open');
                 overlay.classList.remove('open');
@@ -1851,12 +2330,12 @@
                 loadWorkspaceList();
             }
         }
-        
+
         async function loadWorkspaceList() {
             try {
                 const res = await fetch('/api/workspaces');
                 const data = await res.json();
-                
+
                 if (data.success) {
                     workspaceList = data.workspaces;
                     renderWorkspaceList();
@@ -1865,10 +2344,10 @@
                 console.error('加载工作区列表失败:', e);
             }
         }
-        
+
         function renderWorkspaceList() {
             const container = document.getElementById('workspaceList');
-            
+
             if (workspaceList.length === 0) {
                 container.innerHTML = `
                     <div class="no-data">
@@ -1878,12 +2357,12 @@
                 `;
                 return;
             }
-            
+
             container.innerHTML = workspaceList.map(ws => {
                 const isActive = ws.id === currentWorkspaceId;
                 const date = ws.updated_at ? new Date(ws.updated_at).toLocaleString('zh-CN') : '';
                 return `
-                    <div class="workspace-item ${isActive ? 'active' : ''}" 
+                    <div class="workspace-item ${isActive ? 'active' : ''}"
                          onclick="switchWorkspace('${ws.id}')" data-id="${ws.id}">
                         <div class="workspace-item-header">
                             <span class="workspace-item-name">${escapeHtml(ws.name)}</span>
@@ -1899,58 +2378,108 @@
                 `;
             }).join('');
         }
-        
+
         function escapeHtml(text) {
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
         }
-        
+
+        // 检测策略代码中的运行模式
+        function detectRunMode(code) {
+            // 优先匹配 RUN_MODE = RunMode.XXX 的赋值语句
+            const assignmentMatch = code.match(/RUN_MODE\s*=\s*RunMode\.(BACKTEST|SIMNOW|REAL_TRADING)/);
+            if (assignmentMatch) {
+                return assignmentMatch[1];
+            }
+            // 备选：逐行查找未被注释的 RunMode.XXX
+            const lines = code.split('\n');
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (trimmed.startsWith('#')) continue;
+                if (trimmed.includes('RunMode.SIMNOW')) return 'SIMNOW';
+                if (trimmed.includes('RunMode.REAL_TRADING')) return 'REAL_TRADING';
+            }
+            return 'BACKTEST';
+        }
+
+        // 获取运行模式的中文名称
+        function getRunModeLabel(mode) {
+            const labels = {
+                'SIMNOW': 'SIMNOW 模拟交易',
+                'REAL_TRADING': 'CTP 实盘交易',
+                'BACKTEST': '回测'
+            };
+            return labels[mode] || '回测';
+        }
+
+        // 获取运行模式的动词
+        function getRunModeVerb(mode) {
+            const verbs = {
+                'SIMNOW': '运行',
+                'REAL_TRADING': '启动',
+                'BACKTEST': '运行'
+            };
+            return verbs[mode] || '运行';
+        }
+
+        // 更新按钮文字根据当前策略的运行模式
+        function updateRunButtonText() {
+            const mode = detectRunMode(currentStrategy);
+            const label = getRunModeLabel(mode);
+            const verb = getRunModeVerb(mode);
+            // 更新编辑器下方的主按钮
+            const editorBtn = document.querySelector('.editor-actions .btn-success');
+            if (editorBtn) {
+                editorBtn.textContent = `▶️ ${verb}${mode === 'BACKTEST' ? '回测' : label}`;
+            }
+        }
+
         async function createNewWorkspace() {
             const defaultName = generateWorkspaceName('新工作区');
             const name = prompt('请输入工作区名称:', defaultName);
             if (!name) return;
-            
+
             // 如果AI正在生成，先停止
             if (isWaitingResponse) {
                 await stopGeneration();
             }
-            
+
             // 保存当前工作区
             if (currentWorkspaceId) {
                 await saveCurrentWorkspace();
             }
-            
+
             try {
-                
+
                 const res = await fetch('/api/workspace', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ name })
                 });
                 const data = await res.json();
-                
+
                 if (data.success) {
                     currentWorkspaceId = data.workspace.id;
                     localStorage.setItem('lastWorkspaceId', currentWorkspaceId);
                     document.getElementById('currentWorkspaceName').textContent = name;
-                    
+
                     // 清空当前状态
                     chatHistory = [];
                     const chatMessages = document.getElementById('chatMessages');
                     chatMessages.innerHTML = '';
                     createWelcomeMessage(chatMessages);
-                    
+
                     if (editor) {
                         editor.setValue('');
                     }
                     currentStrategy = '';
                     previousStrategy = '';
-                    
+
                     showToast('工作区已创建: ' + name);
                     loadWorkspaceList();
                     toggleWorkspaceSidebar();
-                    
+
                     // 刷新报告和历史列表（新工作区应该是空的）
                     await refreshReports();
                     await loadHistory();
@@ -1959,7 +2488,7 @@
                 showToast('创建工作区失败', 'error');
             }
         }
-        
+
         function createWelcomeMessage(container) {
             const welcome = document.createElement('div');
             welcome.className = 'welcome-message';
@@ -1970,55 +2499,55 @@
                 <p class="welcome-subtitle">输入你的需求，我可以帮你：</p>
                 <div class="welcome-features">
                     <div class="welcome-feature"><span class="welcome-feature-icon">📝</span><span>生成量化交易策略代码</span></div>
-                    <div class="welcome-feature"><span class="welcome-feature-icon">📊</span><span>自动回测并分析结果</span></div>
+                    <div class="welcome-feature"><span class="welcome-feature-icon">📊</span><span>自动运行并分析结果</span></div>
                     <div class="welcome-feature"><span class="welcome-feature-icon">🔧</span><span>调试和优化策略</span></div>
                     <div class="welcome-feature"><span class="welcome-feature-icon">💡</span><span>解答量化交易问题</span></div>
                 </div>
             `;
             container.appendChild(welcome);
         }
-        
+
         async function switchWorkspace(workspaceId) {
             if (workspaceId === currentWorkspaceId) {
                 toggleWorkspaceSidebar();
                 return;
             }
-            
+
             // 如果AI正在生成，先停止
             if (isWaitingResponse) {
                 await stopGeneration();
             }
-            
+
             // 保存当前工作区
             if (currentWorkspaceId) {
                 await saveCurrentWorkspace();
             }
-            
+
             try {
                 const res = await fetch(`/api/workspace/${workspaceId}`);
                 const data = await res.json();
-                
+
                 if (data.success) {
                     const ws = data.workspace;
                     currentWorkspaceId = ws.id;
                     localStorage.setItem('lastWorkspaceId', currentWorkspaceId);
                     document.getElementById('currentWorkspaceName').textContent = ws.name;
-                    
+
                     // 恢复对话历史
                     chatHistory = ws.chat_history || [];
                     restoreChatUI(chatHistory);
-                    
+
                     // 恢复代码
                     if (editor) {
                         const code = ws.editor_code || '';
                         editor.setValue(code);
                         currentStrategy = code;
                     }
-                    
+
                     showToast('已切换到: ' + ws.name);
                     renderWorkspaceList();
                     toggleWorkspaceSidebar();
-                    
+
                     // 刷新报告和历史列表
                     refreshReports();
                     loadHistory();
@@ -2027,42 +2556,42 @@
                 showToast('切换工作区失败', 'error');
             }
         }
-        
+
         function restoreChatUI(history) {
             const chatMessages = document.getElementById('chatMessages');
             chatMessages.innerHTML = '';
-            
+
             if (history.length === 0) {
                 createWelcomeMessage(chatMessages);
                 return;
             }
-            
+
             history.forEach(msg => {
                 const div = document.createElement('div');
-                div.className = `message ${msg.role === 'user' ? 'user-message' : 'ai-message'}`;
-                
-                if (msg.role === 'user') {
-                    div.innerHTML = `<div class="message-content">${escapeHtml(msg.content)}</div>`;
-                } else {
-                    div.innerHTML = `
-                        <div class="message-avatar">🤖</div>
-                        <div class="message-content">${safeMarkedParse(msg.content)}</div>
-                    `;
-                }
+                // 修正类名：CSS 中实际使用的是 message-user / message-ai
+                const roleClass = msg.role === 'user' ? 'message-user' : 'message-ai';
+                div.className = `message ${roleClass}`;
+
+                // 统一结构和 addMessage 保持一致，避免样式错乱
+                const contentHtml = msg.role === 'user'
+                    ? escapeHtml(msg.content)
+                    : safeMarkedParse(msg.content);
+                div.innerHTML = `<div class="message-content">${contentHtml}</div>`;
+
                 chatMessages.appendChild(div);
             });
-            
+
             chatMessages.scrollTop = chatMessages.scrollHeight;
         }
-        
+
         async function saveCurrentWorkspace() {
             if (!currentWorkspaceId) return;
-            
+
             // 保存当前工作区ID到localStorage
             localStorage.setItem('lastWorkspaceId', currentWorkspaceId);
-            
+
             const editorCode = editor ? editor.getValue() : '';
-            
+
             try {
                 await fetch(`/api/workspace/${currentWorkspaceId}`, {
                     method: 'PUT',
@@ -2076,56 +2605,57 @@
                 console.error('保存工作区失败:', e);
             }
         }
-        
+
         let lastWorkspaceSaveTime = 0;
         function autoSaveWorkspace() {
             if (!currentWorkspaceId) return;
-            
+
             // 节流：至少间隔3秒才保存一次
             const now = Date.now();
             const minInterval = 3000;
-            
+
             if (workspaceSaveTimer) {
                 clearTimeout(workspaceSaveTimer);
             }
-            
+
             const timeSinceLastSave = now - lastWorkspaceSaveTime;
             const delay = timeSinceLastSave < minInterval ? minInterval : 1000;
-            
+
             workspaceSaveTimer = setTimeout(() => {
                 lastWorkspaceSaveTime = Date.now();
                 saveCurrentWorkspace();
             }, delay);
         }
-        
+
         async function renameWorkspace(workspaceId, currentName) {
             const newName = prompt('请输入新名称:', currentName);
             if (!newName || newName === currentName) return;
-            
+
             try {
                 await fetch(`/api/workspace/${workspaceId}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ name: newName })
                 });
-                
+
                 if (workspaceId === currentWorkspaceId) {
                     document.getElementById('currentWorkspaceName').textContent = newName;
                 }
-                
+
                 loadWorkspaceList();
                 showToast('已重命名');
             } catch (e) {
                 showToast('重命名失败', 'error');
             }
         }
-        
+
         async function deleteWorkspace(workspaceId) {
-            if (!confirm('确定删除此工作区？此操作不可恢复。')) return;
-            
+            const confirmMsg = '⚠️ 确定删除此工作区？\n\n以下关联数据将一并删除且不可恢复：\n  • 历史会话记录\n  • 编辑器中的策略代码\n  • 该工作区下的回测报告\n  • 该工作区下保存的策略文件\n\n此操作不可恢复，是否继续？';
+            if (!confirm(confirmMsg)) return;
+
             try {
                 await fetch(`/api/workspace/${workspaceId}`, { method: 'DELETE' });
-                
+
                 if (workspaceId === currentWorkspaceId) {
                     currentWorkspaceId = null;
                     localStorage.removeItem('lastWorkspaceId');
@@ -2139,41 +2669,41 @@
                     refreshReports();
                     loadHistory();
                 }
-                
+
                 loadWorkspaceList();
                 showToast('工作区已删除');
             } catch (e) {
                 showToast('删除失败', 'error');
             }
         }
-        
+
         let workspaceInitialized = false;  // 防止重复初始化
-        
+
         async function loadLastWorkspace() {
             // 防止重复执行
             if (workspaceInitialized) return;
             workspaceInitialized = true;
-            
+
             // 从localStorage获取上次的工作区ID
             const lastWorkspaceId = localStorage.getItem('lastWorkspaceId');
-            
+
             // 检查是否是有效的工作区ID（不是 null、undefined、空字符串或字符串 "undefined"）
             if (lastWorkspaceId && lastWorkspaceId !== 'undefined' && lastWorkspaceId !== 'null') {
                 try {
                     const res = await fetch(`/api/workspace/${lastWorkspaceId}`);
                     const data = await res.json();
-                    
+
                     if (data.success) {
                         const ws = data.workspace;
                         currentWorkspaceId = ws.id;
                         document.getElementById('currentWorkspaceName').textContent = ws.name;
-                        
+
                         // 恢复对话历史
                         if (ws.chat_history && ws.chat_history.length > 0) {
                             chatHistory = ws.chat_history;
                             restoreChatUI(chatHistory);
                         }
-                        
+
                         // 恢复代码
                         if (editor && ws.editor_code) {
                             editor.setValue(ws.editor_code);
@@ -2192,11 +2722,11 @@
                 // 清除无效的值
                 localStorage.removeItem('lastWorkspaceId');
             }
-            
+
             // 没有上次的工作区或加载失败，自动创建默认工作区
             await createDefaultWorkspace();
         }
-        
+
         // 生成带时间戳的工作区名称
         function generateWorkspaceName(prefix = '工作区') {
             const now = new Date();
@@ -2206,7 +2736,7 @@
             const minutes = String(now.getMinutes()).padStart(2, '0');
             return `${prefix}_${month}${day}_${hours}${minutes}`;
         }
-        
+
         async function createDefaultWorkspace() {
             try {
                 const name = generateWorkspaceName('工作区');
@@ -2216,9 +2746,9 @@
                     body: JSON.stringify({ name: name })
                 });
                 const data = await response.json();
-                
+
                 if (data.success) {
-                    currentWorkspaceId = data.workspace_id;
+                    currentWorkspaceId = data.workspace.id;
                     localStorage.setItem('lastWorkspaceId', currentWorkspaceId);
                     document.getElementById('currentWorkspaceName').textContent = name;
                     loadWorkspaceList();
@@ -2251,8 +2781,9 @@
             }
         }
 
-        // ==================== 回测 ====================
+        // ==================== 策略运行 ====================
         async function runBacktest() {
+            console.log('[DEBUG] runBacktest 被调用');
             // 优先使用 currentStrategy（确保 diff 模式下也能获取最新代码）
             let code = currentStrategy;
             if (!code && editor) {
@@ -2262,31 +2793,41 @@
             if (editor && code && editor.getValue() !== code) {
                 editor.setValue(code);
             }
-            
+
             if (!code || code.includes('# 策略代码将在这里显示')) {
                 showToast('请先生成策略代码', 'error');
                 return;
             }
 
             const params = getBacktestParams();
+            const runMode = detectRunMode(code);
+            const modeLabel = getRunModeLabel(runMode);
+            const modeVerb = getRunModeVerb(runMode);
+
             switchRightTab('params');
             clearLog();
-            addLog('启动回测...', 'info');
+            addLog(`${modeVerb}${modeLabel}...`, 'info');
+            document.getElementById('runLogActions').style.display = 'flex';
 
             document.getElementById('statusDot').className = 'status-dot running';
-            document.getElementById('statusText').textContent = '回测中...';
+            document.getElementById('statusText').textContent = `${modeLabel}中...`;
 
             try {
+                console.log('[DEBUG] 发送 /api/backtest/start 请求');
                 const response = await fetch('/api/backtest/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ code, params, workspace_id: currentWorkspaceId || '' })
                 });
+                console.log('[DEBUG] /api/backtest/start 响应状态:', response.status);
                 const data = await response.json();
+                console.log('[DEBUG] /api/backtest/start 响应数据:', data);
                 if (data.success) {
+                    console.log('[DEBUG] 启动成功，调用 listenBacktestStatus');
                     listenBacktestStatus();
                 } else {
                     addLog(`错误: ${data.error}`, 'error');
+                    document.getElementById('runLogActions').style.display = 'none';
                     resetStatus();
                     // 如果开启自动调试，让AI分析错误；否则显示修复按钮
                     if (autoSettings.debug && data.error) {
@@ -2296,7 +2837,9 @@
                     }
                 }
             } catch (error) {
+                console.error('[DEBUG] /api/backtest/start 请求失败:', error);
                 addLog(`请求失败: ${error.message}`, 'error');
+                document.getElementById('runLogActions').style.display = 'none';
                 resetStatus();
                 // 如果开启自动调试，让AI分析错误；否则显示修复按钮
                 if (autoSettings.debug) {
@@ -2305,6 +2848,37 @@
                     showErrorWithFixButton([error.message]);
                 }
             }
+        }
+
+        async function stopBacktest() {
+            console.log('[DEBUG] stopBacktest 被调用');
+            // 无论后端响应如何，先重置前端状态
+            isBacktestRunning = false;
+            document.getElementById('runLogActions').style.display = 'none';
+            resetStatus();
+            addLog('⏹ 已发送停止指令', 'warning');
+
+            try {
+                const response = await fetch('/api/backtest/stop', { method: 'POST' });
+                const data = await response.json();
+                console.log('[DEBUG] /api/backtest/stop 响应:', data);
+                if (data.success) {
+                    showToast('策略进程已终止');
+                } else {
+                    addLog(`停止失败: ${data.error}`, 'error');
+                }
+            } catch (error) {
+                console.error('[DEBUG] /api/backtest/stop 请求失败:', error);
+                addLog(`停止请求失败: ${error.message}`, 'error');
+            }
+        }
+
+        async function restartBacktest() {
+            await stopBacktest();
+            // 等待一小段时间确保进程已终止，然后重新启动
+            setTimeout(() => {
+                runBacktest();
+            }, 800);
         }
 
         function getBacktestParams() {
@@ -2350,13 +2924,13 @@
                     data_sources: getDataSources(),
                 };
             }
-            
-            // 保存回测参数到本地
+
+            // 保存运行参数到本地
             saveBacktestParams(params);
             return params;
         }
-        
-        // 保存回测参数（防抖）
+
+        // 保存运行参数（防抖）
         let saveParamsTimer = null;
         function saveBacktestParams(params) {
             if (saveParamsTimer) clearTimeout(saveParamsTimer);
@@ -2367,38 +2941,85 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ backtest_params: params })
                     });
-                    console.log('回测参数已保存');
-                } catch (e) { console.error('保存回测参数失败:', e); }
+                    console.log('运行参数已保存');
+                } catch (e) { console.error('保存运行参数失败:', e); }
             }, 500);
         }
 
-        let backtestErrors = [];  // 收集回测错误
-        let lastReportPath = null;  // 最后一次回测报告路径
+        let backtestErrors = [];  // 收集运行错误
+        let lastReportPath = null;  // 最后一次运行报告路径
         let backtestHasError = false;  // 是否有错误
         let backtestWorker = null;  // Web Worker（后台不断开）
-        let isBacktestRunning = false;  // 回测是否正在运行
+        let isBacktestRunning = false;  // 是否正在运行
 
         // 创建 Web Worker 来处理 SSE（后台不会断开）
         function createBacktestWorker() {
             const workerCode = `
                 let eventSource = null;
-                
-                self.onmessage = function(e) {
-                    if (e.data.action === 'start') {
-                        if (eventSource) eventSource.close();
-                        
-                        eventSource = new EventSource(e.data.url);
-                        
-                        eventSource.onmessage = function(event) {
-                            self.postMessage({ type: 'message', data: event.data });
-                        };
-                        
-                        eventSource.onerror = function() {
-                            self.postMessage({ type: 'error' });
+                let reconnectTimer = null;
+                let reconnectCount = 0;
+                const MAX_RECONNECT = 5;
+                const RECONNECT_DELAY = 3000;
+                let currentUrl = null;
+                let isRunning = false;
+
+                function connect(url) {
+                    currentUrl = url;
+                    isRunning = true;
+                    if (eventSource) eventSource.close();
+
+                    eventSource = new EventSource(url);
+
+                    eventSource.onopen = function() {
+                        reconnectCount = 0;
+                        self.postMessage({ type: 'open' });
+                    };
+
+                    eventSource.onmessage = function(event) {
+                        self.postMessage({ type: 'message', data: event.data });
+                        // 如果收到 done，标记为非运行中，不再重连
+                        try {
+                            const data = JSON.parse(event.data);
+                            if (data.type === 'done' || data.done) {
+                                isRunning = false;
+                            }
+                        } catch(e) {}
+                    };
+
+                    eventSource.onerror = function() {
+                        if (!isRunning) {
+                            // 已完成，不需要重连
                             eventSource.close();
                             eventSource = null;
-                        };
+                            return;
+                        }
+                        eventSource.close();
+                        eventSource = null;
+
+                        if (reconnectCount < MAX_RECONNECT) {
+                            reconnectCount++;
+                            self.postMessage({ type: 'reconnecting', count: reconnectCount, max: MAX_RECONNECT });
+                            reconnectTimer = setTimeout(() => {
+                                if (currentUrl && isRunning) {
+                                    connect(currentUrl);
+                                }
+                            }, RECONNECT_DELAY * reconnectCount);
+                        } else {
+                            self.postMessage({ type: 'error', message: 'SSE 连接失败，已重试 ' + MAX_RECONNECT + ' 次' });
+                            isRunning = false;
+                        }
+                    };
+                }
+
+                self.onmessage = function(e) {
+                    if (e.data.action === 'start') {
+                        reconnectCount = 0;
+                        isRunning = true;
+                        clearTimeout(reconnectTimer);
+                        connect(e.data.url);
                     } else if (e.data.action === 'stop') {
+                        isRunning = false;
+                        clearTimeout(reconnectTimer);
                         if (eventSource) {
                             eventSource.close();
                             eventSource = null;
@@ -2406,79 +3027,99 @@
                     }
                 };
             `;
-            
+
             const blob = new Blob([workerCode], { type: 'application/javascript' });
             return new Worker(URL.createObjectURL(blob));
         }
 
         function listenBacktestStatus() {
+            console.log('[DEBUG] listenBacktestStatus 被调用');
             // 关闭已有 Worker
             if (backtestWorker) {
+                console.log('[DEBUG] 终止旧 Worker');
                 backtestWorker.postMessage({ action: 'stop' });
                 backtestWorker.terminate();
                 backtestWorker = null;
             }
-            
+
             backtestErrors = [];
             lastReportPath = null;
             backtestHasError = false;
             isBacktestRunning = true;
-            
+
             // 创建新的 Worker
             backtestWorker = createBacktestWorker();
-            
+
             backtestWorker.onmessage = function(e) {
                 if (e.data.type === 'message') {
-                    const data = JSON.parse(e.data.data);
-                    handleBacktestMessage(data);
-                } else if (e.data.type === 'error') {
-                    // Worker 中的 SSE 出错，回退到主线程 SSE
-                    if (isBacktestRunning) {
-                        fallbackToMainThreadSSE();
+                    try {
+                        const data = JSON.parse(e.data.data);
+                        console.log('[DEBUG] SSE 收到消息:', data.type, data.message?.substring?.(0, 50));
+                        handleBacktestMessage(data);
+                    } catch (err) {
+                        console.error('[DEBUG] SSE 消息解析失败:', err, '原始数据:', e.data.data);
                     }
+                } else if (e.data.type === 'open') {
+                    console.log('[DEBUG] SSE 连接已建立');
+                } else if (e.data.type === 'reconnecting') {
+                    console.warn(`[DEBUG] SSE 断开，第 ${e.data.count}/${e.data.max} 次重连中...`);
+                    addLog(`⏳ 连接中断，正在重试 (${e.data.count}/${e.data.max})...`, 'warning');
+                } else if (e.data.type === 'error') {
+                    console.warn('[DEBUG] Worker SSE 出错:', e.data.message);
+                    addLog(`❌ 连接失败: ${e.data.message || 'SSE 连接异常'}`, 'error');
+                    isBacktestRunning = false;
+                    document.getElementById('runLogActions').style.display = 'none';
+                    resetStatus();
                 }
             };
-            
+
             // 启动 Worker 中的 SSE
-            backtestWorker.postMessage({ 
-                action: 'start', 
-                url: window.location.origin + '/api/backtest/status' 
+            console.log('[DEBUG] 启动 Worker SSE:', window.location.origin + '/api/backtest/status');
+            backtestWorker.postMessage({
+                action: 'start',
+                url: window.location.origin + '/api/backtest/status'
             });
         }
-        
-        // 处理回测消息
+
+        // 处理运行消息
         function handleBacktestMessage(data) {
-            if (data.type === 'done') { 
+            console.log('[DEBUG] handleBacktestMessage:', data.type);
+            if (data.type === 'done') {
+                console.log('[DEBUG] 收到 done，重置状态');
                 if (backtestWorker) {
                     backtestWorker.postMessage({ action: 'stop' });
                     backtestWorker.terminate();
                     backtestWorker = null;
                 }
                 isBacktestRunning = false;
-                resetStatus(); 
-                refreshReports(); 
-                
+                document.getElementById('runLogActions').style.display = 'none';
+                resetStatus();
+                refreshReports();
+
                 if (backtestErrors.length > 0 || backtestHasError) {
                     const uniqueErrors = [...new Set(backtestErrors)];
                     if (autoSettings.debug) {
+                        iterationCount++;
                         setTimeout(() => autoDebugErrors(uniqueErrors), 500);
                     } else {
                         showErrorWithFixButton(uniqueErrors);
                     }
                 } else if (lastReportPath) {
                     if (autoSettings.debug) {
+                        iterationCount++;
                         setTimeout(() => analyzeReport(lastReportPath), 1000);
                     } else {
                         showBacktestSuccessButtons(lastReportPath);
                     }
                 }
-                return; 
+                return;
             }
             if (data.type === 'heartbeat') return;
             if (data.type === 'report') {
                 lastReportPath = data.path;
                 refreshReports();
                 switchRightTab('report');
+                return;
             }
             if (data.type === 'error') {
                 backtestHasError = true;
@@ -2488,11 +3129,11 @@
             }
             addLog(data.message, data.type);
         }
-        
+
         // 回退到主线程 SSE（如果 Worker 不支持）
         function fallbackToMainThreadSSE() {
             const eventSource = new EventSource('/api/backtest/status');
-            
+
             eventSource.onmessage = function(event) {
                 const data = JSON.parse(event.data);
                 if (data.type === 'done') {
@@ -2500,7 +3141,7 @@
                 }
                 handleBacktestMessage(data);
             };
-            
+
             eventSource.onerror = function() {
                 eventSource.close();
                 resetStatus();
@@ -2510,19 +3151,21 @@
         // 自动调试：让AI分析错误并修复
         async function autoDebugErrors(errors) {
             const errorMsg = errors.join('\n');
-            
+            const mode = detectRunMode(currentStrategy);
+            const label = getRunModeLabel(mode);
+
             // 构建调试请求
-            const debugPrompt = `回测运行出错，请分析以下错误并修复代码：
+            const debugPrompt = `${label}运行出错，请分析以下错误并修复代码：
 
 【错误信息】
 ${errorMsg}
 
 请分析错误原因，使用 SEARCH/REPLACE 格式精确修复出错的代码部分。`;
-            
+
             // 自动发送到AI
             document.getElementById('chatInput').value = debugPrompt;
             showToast('自动调试：正在分析错误...');
-            await sendMessage();
+            await sendMessage(true);
         }
 
         // 存储最后一次错误信息（用于修复按钮）
@@ -2532,7 +3175,9 @@ ${errorMsg}
         function showErrorWithFixButton(errors) {
             const errorMsg = errors.join('\n');
             lastBacktestError = errorMsg;  // 保存错误信息
-            
+            const mode = detectRunMode(currentStrategy);
+            const label = getRunModeLabel(mode);
+
             // 在聊天中添加错误提示和修复按钮
             const errorId = 'error-msg-' + Date.now();
             const container = document.getElementById('chatMessages');
@@ -2545,7 +3190,7 @@ ${errorMsg}
                     <div class="message-content">
                         <div style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; margin-bottom: 12px; color: #ef4444; font-size: 13px;">
                             <span>❌</span>
-                            <span>回测运行出错</span>
+                            <span>${label}运行出错</span>
                         </div>
                         <pre style="background: var(--bg-primary); padding: 12px; border-radius: 6px; font-size: 12px; overflow-x: auto; white-space: pre-wrap; word-break: break-all;">${escapeHtml(errorMsg)}</pre>
                         <div class="ai-action-buttons" style="margin-top: 16px; display: flex; gap: 10px; flex-wrap: wrap;">
@@ -2553,7 +3198,7 @@ ${errorMsg}
                                 <span>🔧</span> 让AI修复
                             </button>
                             <button class="ai-action-btn" onclick="runBacktest()">
-                                <span>🔄</span> 重新回测
+                                <span>🔄</span> 重新${mode === 'BACKTEST' ? '回测' : '运行'}
                             </button>
                         </div>
                     </div>
@@ -2569,14 +3214,16 @@ ${errorMsg}
                 showToast('没有错误信息', 'error');
                 return;
             }
-            
-            const debugPrompt = `回测运行出错，请分析以下错误并修复代码：
+
+            const mode = detectRunMode(currentStrategy);
+            const label = getRunModeLabel(mode);
+            const debugPrompt = `${label}运行出错，请分析以下错误并修复代码：
 
 【错误信息】
 ${lastBacktestError}
 
 请分析错误原因，使用 SEARCH/REPLACE 格式精确修复出错的代码部分。`;
-            
+
             document.getElementById('chatInput').value = debugPrompt;
             await sendMessage();
         }
@@ -2592,7 +3239,7 @@ ${lastBacktestError}
 4. 改进资金管理
 
 请使用 SEARCH/REPLACE 格式精确修改需要改动的部分，不要重写整个代码。`;
-            
+
             document.getElementById('chatInput').value = iteratePrompt;
             await sendMessage();
         }
@@ -2606,27 +3253,29 @@ ${lastBacktestError}
             } else if (editor) {
                 code = editor.getValue();
             }
-            
+
             if (!code || code.length < 50) {
                 showToast('没有可保存的策略代码', 'error');
                 return;
             }
-            
+
             // 保存到历史版本
             await saveToHistory(code, false);
-            
+
             // 同时保存工作区
             if (currentWorkspaceId) {
                 await saveCurrentWorkspace();
             }
-            
+
             loadHistory();  // 刷新历史列表
         }
 
-        // 显示回测成功后的操作按钮
+        // 显示运行成功后的操作按钮
         function showBacktestSuccessButtons(reportPath) {
             const filename = reportPath.split(/[\/\\]/).pop();
-            
+            const mode = detectRunMode(currentStrategy);
+            const label = getRunModeLabel(mode);
+
             const container = document.getElementById('chatMessages');
             const div = document.createElement('div');
             div.className = 'message message-assistant';
@@ -2636,9 +3285,9 @@ ${lastBacktestError}
                     <div class="message-content">
                         <div style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; margin-bottom: 12px; color: #10b981; font-size: 13px;">
                             <span>✅</span>
-                            <span>回测完成！</span>
+                            <span>${label}完成！</span>
                         </div>
-                        <p style="margin-bottom: 12px; color: var(--text-secondary);">回测报告已生成，您可以：</p>
+                        <p style="margin-bottom: 12px; color: var(--text-secondary);">${label}报告已生成，您可以：</p>
                         <div class="ai-action-buttons" style="display: flex; gap: 10px; flex-wrap: wrap;">
                             <button class="ai-action-btn primary" onclick="openReport('${filename}')">
                                 <span>📊</span> 查看报告
@@ -2663,32 +3312,34 @@ ${lastBacktestError}
             await analyzeReport(reportPath);
         }
 
-        // 分析回测报告
+        // 分析运行报告
         async function analyzeReport(reportPath) {
             try {
                 const filename = reportPath.split(/[\/\\]/).pop();
                 const response = await fetch(`/api/report/${filename}`);
                 const data = await response.json();
-                
+
                 if (data.success) {
                     // 提取报告中的关键指标（简化版本，只取文本内容）
                     const parser = new DOMParser();
                     const doc = parser.parseFromString(data.content, 'text/html');
                     const textContent = doc.body ? doc.body.innerText.substring(0, 2000) : '无法解析报告';
-                    
-                    const analyzePrompt = `请分析以下回测报告，给出改进建议：
 
-【回测报告摘要】
+                    const analyzePrompt = `请分析以下运行报告，给出改进建议，并直接返回改进后的策略代码。
+
+【运行报告摘要】
 ${textContent}
 
 请分析：
 1. 策略表现如何？
 2. 主要问题是什么？
-3. 有什么改进建议？`;
-                    
+3. 有什么改进建议？
+
+**重要**：分析完成后，请直接使用 SEARCH/REPLACE 格式或完整代码块返回改进后的策略代码。不要只给建议不给代码，因为系统需要自动运行回测验证效果。`;
+
                     document.getElementById('chatInput').value = analyzePrompt;
-                    showToast('自动分析：正在分析回测报告...');
-                    await sendMessage();
+                    showToast('自动分析：正在分析报告...');
+                    await sendMessage(true);
                 }
             } catch (error) {
                 console.error('分析报告失败:', error);
@@ -2729,7 +3380,7 @@ ${textContent}
                     `).join('');
                 } else {
                     actionsDiv.style.display = 'none';
-                    container.innerHTML = '<div class="no-data"><div class="no-data-icon">📈</div><p>暂无回测报告</p></div>';
+                    container.innerHTML = '<div class="no-data"><div class="no-data-icon">📈</div><p>暂无运行报告</p></div>';
                 }
             } catch (error) {
                 console.error('刷新报告失败:', error);
@@ -2769,7 +3420,7 @@ ${textContent}
 
         // 清空所有报告
         async function clearAllReports() {
-            if (!confirm('确定要清空所有回测报告吗？此操作不可恢复！')) return;
+            if (!confirm('确定要清空所有运行报告吗？此操作不可恢复！')) return;
             try {
                 const response = await fetch('/api/reports/clear', { method: 'DELETE' });
                 const data = await response.json();
@@ -2833,7 +3484,7 @@ ${textContent}
             document.querySelector(`.mode-tab[data-mode="${mode}"]`).classList.add('active');
             document.querySelectorAll('.mode-content').forEach(c => c.classList.remove('active'));
             document.getElementById(`mode${mode.charAt(0).toUpperCase() + mode.slice(1)}`).classList.add('active');
-            
+
             // 切换到多品种模式时渲染数据源列表
             if (mode === 'multi') {
                 renderDataSources();
@@ -2849,7 +3500,7 @@ ${textContent}
         function renderDataSources() {
             const container = document.getElementById('dataSourcesList');
             if (!container) return;
-            
+
             container.innerHTML = dataSources.map((ds, idx) => `
                 <div class="data-source-card" data-index="${idx}">
                     <div class="data-source-header">
@@ -2989,7 +3640,7 @@ ${textContent}
             try {
                 const response = await fetch(`/api/history/preview/${index}`);
                 const data = await response.json();
-                
+
                 if (data.success && data.code) {
                     // 使用弹窗显示预览
                     openHistoryPreviewModal(data, index);
@@ -3005,13 +3656,13 @@ ${textContent}
             // 保存预览代码
             previewCode = data.code;
             historyPreviewIndex = index;
-            
+
             // 设置标题
             document.getElementById('codePreviewTitle').textContent = `📝 ${data.name || '历史策略预览'}`;
-            
+
             // 打开模态框
             openModal('codePreviewModal');
-            
+
             // 延迟创建/更新预览编辑器
             setTimeout(() => {
                 if (!previewEditor) {
@@ -3029,17 +3680,17 @@ ${textContent}
                 }
             }, 100);
         }
-        
+
         let historyPreviewIndex = null;
 
         async function loadHistoryCode(index) {
             try {
                 const response = await fetch(`/api/history/${index}`);
                 const data = await response.json();
-                if (data.success && data.item.code) { 
-                    setEditorCode(data.item.code); 
+                if (data.success && data.item.code) {
+                    setEditorCode(data.item.code);
                     lastSavedCode = data.item.code; // 标记为已保存状态，避免重复保存
-                    showToast('已加载历史版本'); 
+                    showToast('已加载历史版本');
                 }
             } catch (error) { console.error('加载历史代码失败:', error); }
         }
@@ -3064,7 +3715,7 @@ ${textContent}
         const providerPresets = {
             'DeepSeek': { base_url: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
             'OpenAI': { base_url: 'https://api.openai.com/v1', model: 'gpt-4o' },
-            'Claude': { base_url: 'https://api.anthropic.com/v1', model: 'claude-3-opus-20240229' },
+            'Claude': { base_url: 'https://api.anthropic.com/v1', model: 'claude-3-7-sonnet-20250219' },
             'Qwen': { base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-max' },
             'Moonshot': { base_url: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
             'Zhipu': { base_url: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4' },
@@ -3093,7 +3744,10 @@ ${textContent}
                     document.getElementById('settingTemp').value = data.ai_settings.temperature;
                     document.getElementById('tempValue').textContent = data.ai_settings.temperature;
                     document.getElementById('settingExtraParams').value = data.ai_settings.extra_params || '';
-                    
+                    document.getElementById('settingThinkingMode').checked = data.ai_settings.thinking_mode || false;
+                    document.getElementById('settingMaxReasoning').value = data.ai_settings.max_reasoning_length !== undefined ? data.ai_settings.max_reasoning_length : 4000;
+                    document.getElementById('settingMaxTokens').value = data.ai_settings.max_tokens !== undefined ? data.ai_settings.max_tokens : 8192;
+
                     // 自动设置
                     autoSettings = {
                         backtest: data.auto_settings.auto_backtest,
@@ -3101,8 +3755,8 @@ ${textContent}
                         iterate: data.auto_settings.auto_iterate
                     };
                     updateAutoToggles();
-                    
-                    // 回测参数 - 单品种
+
+                    // 运行参数 - 单品种
                     const bp = data.backtest_params;
                     if (bp) {
                         // 单品种参数
@@ -3118,7 +3772,7 @@ ${textContent}
                         setValueSafe('paramSlippage', bp.slippage_ticks);
                         setValueSafe('paramAdjust', bp.adjust_type);
                         setValueSafe('paramLookback', bp.lookback_bars);
-                        
+
                         // TICK参数
                         setValueSafe('paramTickSymbol', bp.symbol);
                         setValueSafe('paramTickStartDate', bp.start_date);
@@ -3127,7 +3781,7 @@ ${textContent}
                         setValueSafe('paramTickMultiplier', bp.contract_multiplier);
                         setValueSafe('paramTickSlippage', bp.slippage_ticks);
                         setValueSafe('paramTickLookback', bp.lookback_bars);
-                        
+
                         // 多品种参数
                         setValueSafe('paramMultiStartDate', bp.start_date);
                         setValueSafe('paramMultiEndDate', bp.end_date);
@@ -3136,7 +3790,7 @@ ${textContent}
                         setValueSafe('paramMultiMargin', bp.margin_rate);
                         setValueSafe('paramMultiLookback', bp.lookback_bars);
                         setValueSafe('paramAlignData', bp.align_data ? 'true' : 'false');
-                        
+
                         // 加载数据源配置
                         if (bp.data_sources && bp.data_sources.length > 0) {
                             dataSources = bp.data_sources;
@@ -3146,7 +3800,7 @@ ${textContent}
                 }
             } catch (error) { console.error('加载设置失败:', error); }
         }
-        
+
         function setValueSafe(id, value) {
             const el = document.getElementById(id);
             if (el && value !== undefined) el.value = value;
@@ -3160,7 +3814,10 @@ ${textContent}
                     model: document.getElementById('settingModel').value.trim(),
                     api_key: document.getElementById('settingApiKey').value,
                     temperature: parseFloat(document.getElementById('settingTemp').value),
-                    extra_params: document.getElementById('settingExtraParams').value.trim()
+                    extra_params: document.getElementById('settingExtraParams').value.trim(),
+                    thinking_mode: document.getElementById('settingThinkingMode').checked,
+                    max_reasoning_length: parseInt(document.getElementById('settingMaxReasoning').value) || 4000,
+                    max_tokens: parseInt(document.getElementById('settingMaxTokens').value) || 8192
                 }
             };
             try {
@@ -3182,6 +3839,9 @@ ${textContent}
             document.getElementById('settingTemp').value = '0.7';
             document.getElementById('tempValue').textContent = '0.7';
             document.getElementById('settingExtraParams').value = '';
+            document.getElementById('settingThinkingMode').checked = false;
+            document.getElementById('settingMaxReasoning').value = 4000;
+            document.getElementById('settingMaxTokens').value = 8192;
         }
 
         // ==================== Auto Toggles ====================
@@ -3291,19 +3951,19 @@ ${textContent}
                 if (!autoSave) showToast('代码未变化');
                 return;
             }
-            
+
             try {
                 const response = await fetch('/api/history/save', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
+                    body: JSON.stringify({
                         code: code,
                         auto_save: autoSave,
                         workspace_id: currentWorkspaceId || ''
                     })
                 });
                 const data = await response.json();
-                
+
                 if (data.success && !data.skipped) {
                     lastSavedCode = code;
                     if (!autoSave) {
@@ -3335,19 +3995,19 @@ ${textContent}
         // 前端代码提取（作为后备）
         function extractCodeFromText(text) {
             if (!text) return null;
-            
+
             // 尝试提取完整的 ```python 代码块
             let match = text.match(/```python\s*([\s\S]*?)```/);
             if (match && match[1] && match[1].trim().length > 50) {
                 return match[1].trim();
             }
-            
+
             // 尝试提取完整的 ```py 代码块
             match = text.match(/```py\s*([\s\S]*?)```/);
             if (match && match[1] && match[1].trim().length > 50) {
                 return match[1].trim();
             }
-            
+
             // 尝试提取普通 ``` 代码块
             const matches = text.match(/```\s*([\s\S]*?)```/g);
             if (matches) {
@@ -3358,7 +4018,7 @@ ${textContent}
                     }
                 }
             }
-            
+
             // 处理不完整的代码块（有开头没结尾，续写时可能发生）
             match = text.match(/```python\s*([\s\S]*)$/);
             if (match && match[1]) {
@@ -3367,7 +4027,7 @@ ${textContent}
                     return code;
                 }
             }
-            
+
             // 处理 ```py 开头的不完整代码块
             match = text.match(/```py\s*([\s\S]*)$/);
             if (match && match[1]) {
@@ -3376,7 +4036,7 @@ ${textContent}
                     return code;
                 }
             }
-            
+
             return null;
         }
 

@@ -27,19 +27,19 @@ except ImportError as e:
 def _get_exchange_id(instrument_id: str) -> str:
     """
     根据合约代码自动推导交易所代码
-    
+
     优先从 ContractInfoService（远程API缓存）动态获取，自动覆盖新上市品种；
     若服务不可用则回退到本地硬编码映射表兜底。
-    
+
     Args:
         instrument_id: 合约代码（如 au2602, OI605, IF2603）
-    
+
     Returns:
         交易所代码字符串（SHFE/INE/DCE/CZCE/CFFEX/GFEX），未知品种返回空字符串
     """
     if not instrument_id:
         return ''
-    
+
     # ===== 方式1：从 ContractInfoService 动态获取（自动覆盖新品种） =====
     try:
         from ..data.contract_info import get_contract_info
@@ -50,17 +50,17 @@ def _get_exchange_id(instrument_id: str) -> str:
                 return exchange
     except Exception:
         pass  # 服务不可用，回退到硬编码
-    
+
     # ===== 方式2：硬编码映射表兜底（离线/服务异常时使用） =====
     import re
     match = re.match(r'^([a-zA-Z]+)', instrument_id)
     if not match:
         return ''
-    
+
     product = match.group(1)
     product_lower = product.lower()
     product_upper = product.upper()
-    
+
     # 各交易所品种集合（小写用于SHFE/INE/DCE/GFEX，大写用于CZCE/CFFEX）
     _SHFE = {'cu', 'al', 'zn', 'pb', 'ni', 'sn', 'au', 'ag', 'rb', 'hc', 'wr', 'ss', 'bu', 'ru', 'fu', 'sp', 'ao', 'br'}
     _INE  = {'sc', 'lu', 'nr', 'bc', 'ec'}
@@ -68,7 +68,7 @@ def _get_exchange_id(instrument_id: str) -> str:
     _CZCE = {'AP', 'CF', 'CJ', 'CY', 'FG', 'JR', 'LR', 'MA', 'OI', 'PF', 'PK', 'PM', 'RI', 'RM', 'RS', 'SA', 'SF', 'SM', 'SR', 'TA', 'UR', 'WH', 'ZC', 'SH', 'PX'}
     _CFFEX = {'IC', 'IF', 'IH', 'IM', 'IO', 'MO', 'HO', 'T', 'TF', 'TS', 'TL'}
     _GFEX = {'si', 'lc'}
-    
+
     if product_lower in _SHFE:
         return 'SHFE'
     elif product_lower in _INE:
@@ -81,7 +81,7 @@ def _get_exchange_id(instrument_id: str) -> str:
         return 'CFFEX'
     elif product_lower in _GFEX:
         return 'GFEX'
-    
+
     return ''  # 未知品种，不设置ExchangeID（让CTP自行判断）
 
 
@@ -103,8 +103,19 @@ def close_comb_offset_flag(close_today: bool, instrument_id: str) -> str:
 
     Returns:
         CTP CombOffsetFlag 字符串：'1' / '3' / '4'
+
+    Raises:
+        ValueError: 合约既不在远程 contract_info 缓存里、也不在本地硬编码映射表中。
+                    静默 fallback 到 '1' 可能让 SHFE/INE 品种走错偏移位,
+                    必须让调用方显式感知并补上映射或刷新缓存。
     """
     exch = _get_exchange_id(instrument_id)
+    if not exch:
+        raise ValueError(
+            f"无法推导 {instrument_id!r} 的交易所: 远程合约缓存未命中且本地品种表无此前缀。"
+            f" 请刷新 contract_info 缓存(ssquant.data.contract_info.refresh_contracts)"
+            f"或在 ssquant/pyctp/trader_api.py 的 _get_exchange_id 硬编码集合中补充该品种前缀。"
+        )
     if exch in _SHFE_INE_EXCHANGES:
         return '3' if close_today else '4'
     return '1'
@@ -448,7 +459,7 @@ class TraderApi:
         req.ForceCloseReason = '0'
         req.CombOffsetFlag = offset_flag  # 开平标志
         req.CombHedgeFlag = '1'  # 投机
-        
+
         # 自动设置交易所代码（解决郑商所/中金所等必须指定ExchangeID的问题）
         exchange_id = _get_exchange_id(instrument_id)
         if exchange_id:

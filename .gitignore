@@ -78,6 +78,12 @@ dist/
 backtest_logs/
 backtest_results/
 
+# AI Agent 运行时状态
+ai_agent/settings.json
+ai_agent/history.json
+ai_agent/report_metadata.json
+ai_agent/strategies/
+ai_agent/workspaces/
+
 # 旧的assets目录（已移到ssquant/assets/）
 /assets/
-

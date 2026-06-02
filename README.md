@@ -1,190 +1,90 @@
-# SSQuant — 期货量化交易框架
+# SSQuant - 专业期货 CTP 量化交易框架
 
-<div align="center">
+SSQuant（松鼠Quant）是面向中国期货市场的 Python 量化交易框架，支持一套策略代码在 **回测 / SIMNOW 仿真 / CTP 实盘** 三种环境中运行。
 
-🐿️ **松鼠Quant** | 专业期货 CTP 量化交易框架（回测 / SIMNOW / 实盘）
+它不是只做历史回测的 toy project，而是围绕期货交易的真实工程问题设计：连续合约、复权、换月、保证金、手续费、滑点、CTP 下单、Tick/K 线数据、SIMNOW 验证、实盘运行和回测报告。
 
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)]()
-[![Version](https://img.shields.io/badge/版本-0.4.5-brightgreen.svg)](045.MD)
+当前版本：v0.4.6
+Python：3.9 - 3.14
+License：MIT
 
-[GitHub](https://github.com/songshuquant/ssquant) | [Gitee](https://gitee.com/ssquant/ssquant) | [主页 quant789.com](https://quant789.com)
-
-**一次编写，三处运行**
-
-> 关注公众号 **松鼠Quant**，获取量化策略、框架更新与会员服务
-
-</div>
+- GitHub: https://github.com/songshuquant/ssquant
+- Gitee: https://gitee.com/ssquant/ssquant
+- 官网: https://quant789.com
 
 ---
 
-## 🚀 v0.4.5 核心亮点
+## 一句话理解
 
-### 回测速度 30×–100× 提升
+SSQuant 的核心目标是：
 
-v0.4.5 对回测引擎进行全链路热点消除，引入 **三层性能档位**：
+> 让期货策略从研究、回测、仿真到实盘尽量使用同一套代码和同一套交易接口。
 
-| 档位 | 典型提速 | 用法 |
-|------|---------|------|
-| **Pandas 普通档** | 基准 1× | `api.get_close().rolling(20).mean()` |
-| **ndarray 中档** | **5×–10×** | `api.get_close_array(window=20)` |
-| **IndicatorCache v2** | **30×–100×** | `api.register_indicator()` + `api.get_indicator()` |
-
-底层通过 **ndarray 价格缓存**、**增量账户状态**、**per-Bar K线缓存**、`__slots__` **权益曲线纯对象**、**指标预计算** 等 7 大工程优化，实现数量级飞跃。
+策略只和 `StrategyAPI` 交互：
 
 ```python
-def initialize(api):
-    # 注册一次，全量预计算
-    api.register_indicator('ma20',
-        lambda c, o, h, l, v: pd.Series(c).rolling(20).mean().to_numpy(),
-        window=20)
-
-def strategy(api):
-    # O(1) 查表，零 Pandas 开销
-    ma20 = api.get_indicator('ma20')
+api.buy()
+api.sell()
+api.sellshort()
+api.buycover()
+api.close_all()
 ```
 
-> 同一套代码回测/SIMNOW/实盘通用，数值逐位等价。详见 [045.MD](045.MD)。
-
-### 数据模式：远程 vs 本地
-
-SSQuant 支持两种数据源，满足不同用户需求：
-
-#### 🔷 远程模式（`data_source_mode='data_server'`）— 推荐
-
-**面向 [quant789.com](https://quant789.com) 松鼠俱乐部会员。**
-
-- **数据最新**：服务器维护全品种历史 + 实时 K 线，回测和实盘预加载直接拉取最新数据
-- **免维护**：无需手动导入 CSV，一键回测任意品种任意周期
-- **服务器聚合**：1M/5M/15M/1H/1D 等任意周期由服务端直接推送，无需本地派生
-- **订单流深度数据**：支持 `多开/空开/多平/空平/双开/双平` 等 12+ 订单流字段 + 盘口深度数据
-- **WebSocket 实时推送**：SIMNOW/实盘连接后毫秒级接收新 K 线
+运行环境由 `RunMode` 决定：
 
 ```python
-config = get_config(RunMode.BACKTEST,
-    symbol='rb888',
-    data_source_mode='data_server',  # 默认即远程，可不填
-)
+RunMode.BACKTEST       # 回测
+RunMode.SIMNOW         # SIMNOW 仿真
+RunMode.REAL_TRADING   # CTP 实盘
 ```
-首次使用需在 `ssquant/config/trading_config.py` 填写俱乐部账号：
-```python
-API_USERNAME = "你的俱乐部手机号或邮箱"
-API_PASSWORD = "你的俱乐部密码"
-```
-> 非会员可访问 [quant789.com](https://quant789.com) 或关注公众号 **松鼠Quant** 申请加入。
 
 ---
 
-#### 🔶 本地模式（`data_source_mode='local'`）
+## 核心能力
 
-**无需会员，完全免费，数据自主可控。**
-
-- **零成本**：免会员、免联网（导入后即可离线运行）
-- **TICK 支持**：TICK 回测唯一选择，支持逐笔数据导入
-- **隐私安全**：数据完全留在本地磁盘，策略源码与数据不出境
-- **本地 K 线聚合**：导入 1 分钟数据后，框架自动派生 5M/15M/30M/1H/1D 等任意周期，无需重复导入
-- **CTP 落盘**：实盘/SIMNOW 模式下，框架通过 CTP 接收 Tick，实时合成 K 线并落盘到本地 SQLite，形成你的私有行情库
-
-```python
-config = get_config(RunMode.BACKTEST,
-    symbol='rb888',
-    data_source_mode='local',
-)
-```
-
-**支持导入的数据格式**：
-
-| 格式 | 扩展名 | 说明 |
-|------|--------|------|
-| CSV | `.csv` | 最常用，Excel 另存为 CSV 即可 |
-| Excel | `.xlsx` / `.xls` | 直接读取多 Sheet 文件 |
-| JSON | `.json` | 结构化数据，适合程序化生成 |
-| Parquet | `.parquet` | 列式存储，读取极快，适合大数据量 |
-| Feather | `.feather` | Apache Arrow 格式，跨语言零拷贝 |
-| Pickle | `.pkl` / `.pickle` | Python 原生序列化，DataFrame 直存 |
-
-**数据字段要求（K 线）**：
-
-导入文件必须包含以下列（列名不区分大小写）：
-- `datetime` — 时间戳（如 `2024-01-01 09:00:00`）
-- `open` — 开盘价
-- `high` — 最高价
-- `low` — 最低价
-- `close` — 收盘价
-- `volume` — 成交量
-
-可选列：`open_interest`（持仓量）、`amount`（成交额）等。
-
-**数据字段要求（TICK）**：
-
-TICK 回测需包含：
-- `datetime` — 时间戳（含毫秒）
-- `LastPrice` — 最新价
-- `Volume` — 累计成交量
-- `BidPrice1` / `AskPrice1` — 买一卖一价
-- `BidVolume1` / `AskVolume1` — 买一卖一量
-
-**导入示例**：
-
-```bash
-python examples/A_工具_导入数据库DB示例.py
-```
-
-运行后按提示选择文件格式、文件路径、品种代码（如 `rb888`）、周期（`1m`/`tick`）、复权方式（`raw`/`hfq`/`qfq`），数据自动写入 `data_cache/backtest_data.db`。
-
-**表名格式**：`{symbol}_{period}_{adjust}`  
-**示例**：`rb888_1M_hfq`（螺纹钢主力连续，1分钟，后复权）
-
-**本地 K 线聚合**：
-
-只需导入 **1 分钟 K 线**，框架在回测时自动通过 `ssquant/data/multi_period.py` 本地聚合为任意目标周期：
-
-```python
-# 只导入了 rb888 的 1M 数据
-config = get_config(RunMode.BACKTEST,
-    symbol='rb888',
-    kline_period='15m',        # ← 框架自动从 1M 聚合为 15M
-    data_source_mode='local',
-)
-```
-
-支持的派生周期：`1m` `2m` `3m` `5m` `10m` `15m` `30m` `1h` `2h` `4h` `1d` `1w` 等。
-
-**CTP 通道落盘（实盘/SIMNOW）**：
-
-本地模式不仅用于回测。在 SIMNOW / 实盘模式下，框架通过 CTP 接收交易所原始 Tick：
-
-1. **Tick 实时入队** → CTP 回调将 Tick 写入有界队列
-2. **本地 K 线合成** → `multi_period.py` 按时间切片聚合为 1M/5M 等周期
-3. **SQLite 落盘** → 新 K 线落成后自动写入 `data_cache/backtest_data.db`
-4. **历史预加载** → 下次启动时直接从本地 SQLite 预加载，无需重复拉取
-
-这意味着：**跑一段时间实盘后，你的本地数据库会自动积累历史 K 线，回测时可直接复用。**
+| 能力 | 说明 |
+|---|---|
+| 一套代码三处运行 | 回测、SIMNOW、实盘共享策略主体 |
+| StrategyAPI | 策略唯一数据和交易入口 |
+| 高性能回测 | ndarray 缓存 + IndicatorCache v2 |
+| 本地/远程数据 | 支持 `data_server` 和 `local` 两种模式 |
+| 连续合约 | 支持 `888` 主力、`777` 次主力 |
+| 复权处理 | 支持不复权、后复权、前复权 |
+| 价格双轨制 | 复权策略价映射真实价格，用真实价格计算回测指标 |
+| 自动移仓 | 支持主力换月平旧开新 |
+| 交互式报告 | HTML K 线图、交易标记、综合绩效、费用统计 |
+| AI Agent | 自然语言生成、修改、运行和迭代策略 |
 
 ---
 
-> ⚠️ **TICK 回测必须选 `local`**，远程服务器不支持 TICK 推送。
+## v0.4.6 最重要的变化
+
+v0.4.6 的关键变化不是新增一个普通功能，而是建立价格双轨制：策略使用复权价格保持连续性，回测指标通过映射后的真实价格计算。
+
+过去，策略使用后复权/前复权连续合约时，复权价格既用于指标，也可能进入成交、盯市和权益曲线计算。这样会让换月点附近的盈亏被复权因子污染。
+
+v0.4.6 改为价格双轨体系：
+
+| 价格 | 用途 |
+|---|---|
+| `price` / `current_price` | 策略看到的复权价，用于指标、信号、图表 |
+| `raw_price` / `current_raw_price` | 由复权价映射回的真实价格，用于回测指标、持仓盯市、权益曲线 |
+
+这意味着：
+
+- 策略仍然可以用连续平滑的复权价格做技术指标。
+- 回测指标通过映射后的真实价格计算。
+- 后复权/前复权回测结果可能和 v0.4.5 不一致，这是预期修正。
+
+详细更新见 [046.MD](046.MD)。
 
 ---
 
-> 💡 **新手必读**：`examples/` 目录下包含 **25+ 个完整可运行的策略和工具**，从入门到高级全覆盖，**全部已经跑通验证**。强烈推荐先通读以下示例：
->
-> - **`B_双均线策略_高性能.py`** — 理解 IndicatorCache v2 高性能写法的最佳入口
-> - **`B_海龟交易策略_高性能.py`** — 唐奇安通道 + O(1) 指标查表
-> - **`B_多品种多周期交易策略.py`** — 同时交易多个品种、多个周期
-> - **`A_工具_导入数据库DB示例.py`** — 本地数据导入必读
-> - **`C_纯Tick高频交易策略.py`** — TICK 模式演示
->
-> 所有 `*_高性能.py` 示例与普通版**交易逻辑逐字等价**，仅将 Pandas 计算替换为 `register_indicator`，是上手 v0.4.5  fastest 方式。
+## 安装
 
----
+正式安装请使用源码仓库。PyPI 只保留弃用提示包，不再作为真实安装入口。
 
-## ⚡ 快速开始
-
-### 1. 安装
-
-**方式一：Git 克隆（推荐，更新最方便）**
+### GitHub
 
 ```bash
 git clone https://github.com/songshuquant/ssquant.git
@@ -192,17 +92,7 @@ cd ssquant
 pip install -e .
 ```
 
-**方式二：ZIP 压缩包（无 Git 环境）**
-
-从 GitHub 点击 **Code → Download ZIP** 下载解压，或直接从 Release 下载源码包：
-
-```bash
-# 解压后进入目录（目录名可能为 ssquant-main）
-cd ssquant-main
-pip install -e .
-```
-
-**方式三：Gitee 镜像（国内访问更快）**
+### Gitee
 
 ```bash
 git clone https://gitee.com/ssquant/ssquant.git
@@ -210,191 +100,429 @@ cd ssquant
 pip install -e .
 ```
 
-> ⚠️ 不再支持 PyPI (`pip install ssquant`)，PyPI 仅保留弃用提示包，真实安装必须通过上述方式。
+安装后，如果出现 `ModuleNotFoundError: No module named 'ssquant'`，通常是没有在项目根目录执行 editable install，或误装了 PyPI redirect 包：
 
-### 2. 配置账户（首次安装必填）
+```bash
+pip uninstall ssquant
+pip install -e .
+```
 
-安装完成后，打开 `ssquant/config/trading_config.py` 填写你的账户信息：
+---
 
-- **俱乐部账号**（`API_USERNAME` / `API_PASSWORD`）：使用**远程数据模式**（`data_server`）时需要。非会员用户可改用**本地数据模式**（`local`），导入本地数据后即可完整回测，功能不受限
-- **SIMNOW 账户**：仿真交易时需要，与会员身份无关
-- **实盘账户**（`broker_id` / `investor_id` / `password` / `md_server` / `td_server` / `app_id` / `auth_code`）：真实交易时需要，与会员身份无关
+## 数据模式
 
-> 本地数据模式完全免费，支持回测、TICK、任意周期聚合，功能与远程模式对等（仅数据需自行导入）。如需远程模式可访问 [quant789.com](https://quant789.com) 或关注公众号 **松鼠Quant** 申请俱乐部会员。
+SSQuant 支持两种数据模式。
 
-### 3. 最小策略
+### 远程数据：`data_source_mode='data_server'`
+
+适合 quant789 松鼠俱乐部会员使用。
+
+特点：
+
+- 远程服务器维护历史 K 线和实时 K 线。
+- 回测、SIMNOW、实盘预加载可直接拉取数据。
+- 支持多周期 K 线、订单流和盘口深度数据。
+- 免去本地导入和维护数据的成本。
+
+示例：
 
 ```python
+config = get_config(
+    RunMode.BACKTEST,
+    symbol="rb888",
+    kline_period="15m",
+    data_source_mode="data_server",
+)
+```
+
+需要在 `ssquant/config/trading_config.py` 中配置远程数据账号：
+
+```python
+API_USERNAME = "你的账号"
+API_PASSWORD = "你的密码"
+```
+
+### 本地数据：`data_source_mode='local'`
+
+本地模式不需要会员账号，适合离线回测、私有数据和 Tick 回测。
+
+特点：
+
+- 数据保存在本地 SQLite。
+- 支持 CSV、Excel、JSON、Parquet、Feather、Pickle 导入。
+- Tick 回测必须使用本地模式。
+- 导入 1 分钟 K 线后可派生 5m、15m、1h、1d 等周期。
+- SIMNOW/实盘可通过 CTP Tick 落盘，逐步积累自己的本地行情库。
+
+示例：
+
+```python
+config = get_config(
+    RunMode.BACKTEST,
+    symbol="rb888",
+    kline_period="15m",
+    data_source_mode="local",
+)
+```
+
+导入本地数据：
+
+```bash
+python examples/A_工具_导入数据库DB示例.py
+```
+
+---
+
+## 第一个策略
+
+下面是一个最小高性能双均线思路示例。它使用 `initialize(api)` 注册指标，在 `strategy(api)` 中 O(1) 查询。
+
+```python
+import pandas as pd
 from ssquant.api.strategy_api import StrategyAPI
 from ssquant.backtest.unified_runner import UnifiedStrategyRunner, RunMode
 from ssquant.config.trading_config import get_config
 
+
+def initialize(api: StrategyAPI):
+    api.register_indicator(
+        "ma20",
+        lambda c, o, h, l, v: pd.Series(c).rolling(20).mean().to_numpy(),
+        window=20,
+    )
+
+
 def strategy(api: StrategyAPI):
-    close = api.get_close()
-    if len(close) < 20:
+    price = api.get_price()
+    ma20 = api.get_indicator("ma20")
+
+    if pd.isna(ma20):
         return
-    ma20 = close.rolling(20).mean().iloc[-1]
-    if close.iloc[-1] > ma20 and api.get_pos() <= 0:
-        api.buy(volume=1, order_type='next_bar_open')
+
+    if price > ma20 and api.get_pos() <= 0:
+        api.buy(volume=1, order_type="next_bar_open", reason="上穿 MA20")
+    elif price < ma20 and api.get_pos() > 0:
+        api.sell(order_type="next_bar_open", reason="下穿 MA20")
+
 
 if __name__ == "__main__":
-    config = get_config(RunMode.BACKTEST,
-        symbol='rb888', kline_period='1h',
-        start_date='2024-01-01', end_date='2025-01-01',
-        initial_capital=100000)
+    config = get_config(
+        RunMode.BACKTEST,
+        symbol="rb888",
+        kline_period="1h",
+        start_date="2024-01-01",
+        end_date="2025-01-01",
+        adjust_type="1",
+        data_source_mode="data_server",
+        initial_capital=100000,
+    )
+
     runner = UnifiedStrategyRunner(mode=RunMode.BACKTEST)
     runner.set_config(config)
-    runner.run(strategy=strategy)
+    runner.run(strategy=strategy, initialize=initialize)
 ```
 
-### 4. 三模式切换（策略代码不改）
+---
+
+## 三模式切换
+
+策略函数不需要因为运行环境变化而重写。通常只切换 `RunMode` 和配置。
 
 ```python
 # 回测
-config = get_config(RunMode.BACKTEST, symbol='rb888',
-                    start_date='2024-01-01', end_date='2025-01-01',
-                    kline_period='1h')
+config = get_config(
+    RunMode.BACKTEST,
+    symbol="rb888",
+    kline_period="1h",
+    start_date="2024-01-01",
+    end_date="2025-01-01",
+)
 
 # SIMNOW 仿真
-config = get_config(RunMode.SIMNOW, account='simnow_default',
-                    symbol='rb888', kline_period='1m')
+config = get_config(
+    RunMode.SIMNOW,
+    account="simnow_default",
+    symbol="rb888",
+    kline_period="5m",
+)
 
-# 实盘
-config = get_config(RunMode.REAL_TRADING, account='real_default',
-                    symbol='rb888', kline_period='1m')
+# CTP 实盘
+config = get_config(
+    RunMode.REAL_TRADING,
+    account="real_default",
+    symbol="rb888",
+    kline_period="5m",
+)
 ```
 
----
-
-## 📊 性能实测
-
-| 场景 | v0.4.4 | v0.4.5 | 提升 |
-|------|--------|--------|------|
-| 单品种双均线 1h/5年 | ~45s | ~1.2s | **37×** |
-| 5指标×4数据源 1m/1年 | ~28min | ~18s | **93×** |
-| 网格参数优化 400组 | >2h | ~4min | **30×** |
+实盘策略建议捕获关键异常，避免单根 K 线错误导致整个交易进程退出。
 
 ---
 
-## 🎯 关键特性
+## StrategyAPI 约定
 
-- **一套代码三处运行** — 回测 / SIMNOW / 实盘，零改动切换
-- **高性能 ndarray API** — `get_close_array()` 等零拷贝接口
-- **IndicatorCache v2** — 注册一次，O(1) 查询，回测/实盘通用
-- **本地数据模式** — SQLite 直读，免会员，支持 TICK
-- **多品种多周期** — 同时交易多个品种，独立配置
-- **自动移仓** — 主力换月自动平旧开新 (`simultaneous` / `sequential`)
-- **智能算法交易** — 限价排队、超时撤单、追价重发
-- **订单流数据** — data_server 模式支持 12+ 订单流字段
-- **本地复权** — 前复权/后复权，基于合约切换点比例因子
-- **AI Agent 技能** — 内置 SKILL.md 标准，支持 Claude/Cursor 等 AI 助手直接编写策略
+策略必须通过 `StrategyAPI` 交易。不要在策略里直接操作底层 CTP 接口。
+
+### 交易接口
+
+```python
+api.buy(volume=1)        # 开多
+api.sell(volume=1)       # 平多
+api.sellshort(volume=1)  # 开空
+api.buycover(volume=1)   # 平空
+api.close_all()          # 全部平仓
+```
+
+### 数据接口
+
+```python
+api.get_price()
+api.get_open()
+api.get_high()
+api.get_low()
+api.get_close()
+api.get_volume()
+api.get_pos()
+api.get_balance()
+```
+
+### 高性能指标接口
+
+```python
+api.register_indicator(name, func, window=None, index=0)
+api.get_indicator(name, index=0)
+api.get_indicator_array(name, window=None, index=0)
+api.get_close_array(window=None, index=0)
+```
+
+AI 生成策略时，默认应该：
+
+- 写 `initialize(api)`。
+- 在 `initialize(api)` 中注册指标。
+- 在 `strategy(api)` 中只做 O(1) 查询。
+- 仅当指标逻辑无法预注册时，才回退到 Pandas 普通写法。
 
 ---
 
-## 🤖 AI 策略助手（ai_agent）
+## 连续合约与复权
 
-`ai_agent/` 是框架内置的 **AI 驱动策略编写 Web IDE**。你只需用自然语言描述交易思路，AI 自动生成符合 SSQuant 规范的策略代码，并可直接在浏览器内一键回测、查看报告、迭代优化。
+SSQuant 常用连续合约约定：
 
-### 核心功能
+| 后缀 | 含义 |
+|---|---|
+| `888` | 主力连续 |
+| `777` | 次主力连续 |
 
-- 💬 **自然语言写策略** — 描述"螺纹钢双均线金叉做多死叉做空"，AI 秒生成完整代码
-- 📝 **Monaco 编辑器** — 类 VS Code 的代码编辑体验，支持语法高亮、自动补全
-- 🚀 **一键回测** — 生成代码后直接点击运行，实时查看回测结果和 HTML 报告
-- 🔄 **自动迭代** — AI 自动分析回测报告，给出优化建议并改写代码
-- 📂 **策略管理** — 自动生成策略文件到 `ai_agent/strategies/`，支持多工作区切换
+复权类型：
 
-### 启动方式
+| 参数 | 含义 |
+|---|---|
+| `adjust_type="0"` | 不复权 |
+| `adjust_type="1"` | 后复权 |
+| `adjust_type="2"` | 前复权 |
 
-```bash
+v0.4.6 起，复权只影响策略看到的价格连续性，不再污染真实盈亏统计。报告中如果复权价和真实价不同，交易表格会显示实际成交价，方便对账。
+
+---
+
+## 回测报告
+
+回测结束后，框架会输出文本报告和 HTML 交互式报告。
+
+HTML 报告包含：
+
+- 资金曲线和利润曲线。
+- 回撤曲线。
+- K 线/Tick 图。
+- 交易标记。
+- 手续费、滑点、交易盈亏、净利润。
+- 多数据源综合页。
+- 交易记录筛选和分页。
+- 复权价与真实价对照显示。
+
+v0.4.6 的综合最大回撤基于综合权益曲线计算，而不是简单取单品种平均。
+
+---
+
+## AI Agent
+
+`ai_agent/` 是 SSQuant 的 AI 策略助手，可以通过自然语言生成、修改、运行和分析策略。
+
+安装依赖：
+
+```powershell
 cd ai_agent
 pip install -r requirements.txt
-python app.py
 ```
 
-打开浏览器访问 **http://localhost:5000**
+启动：
 
-### 使用流程
-
-1. 点击右上角 ⚙️ **配置 AI 模型 API Key**（支持 OpenAI / 智谱 / 通义千问等兼容 OpenAI 接口的模型）
-2. 在对话框输入策略思路，例如：
-   > "写一个海龟交易策略，突破20日高点开多，跌破10日低点平仓，用rb888，1小时K线"
-3. AI 生成代码 → 自动保存到 `ai_agent/strategies/`
-4. 点击 **运行回测**，查看资金曲线、成交记录、绩效指标
-5. 点击 **自动优化**，AI 根据回测结果改进参数或逻辑
-
-> 💡 `ai_agent/` 依赖 `ssquant/` 核心框架运行，必须与框架处于同一目录层级。
-
----
-
-## 📚 文档与示例
-
-| 文档 | 说明 |
-|------|------|
-| [045.MD](045.MD) | **v0.4.5 更新详情**（性能优化、新接口、迁移指南） |
-| [SKILL.md](045/SKILL.md) | 完整框架使用指南（909 行，策略编写 / 回测 / 部署 / 数据） |
-| [AGENTS.md](AGENTS.md) | AI Agent 项目上下文 |
-
-**示例策略（`examples/`）**：
-
-强烈建议新手通读 `examples/` 目录下的策略和工具：
-
-- **`B_双均线策略.py`** / **`B_双均线策略_高性能.py`** — 入门首选，对比普通写法与高性能写法
-- **`B_海龟交易策略.py`** / **`B_海龟交易策略_高性能.py`** — 唐奇安通道 + IndicatorCache v2
-- **`B_多品种多周期交易策略.py`** — 同时交易多个品种、多个周期
-- **`A_工具_导入数据库DB示例.py`** — 本地数据导入必读
-- **`C_纯Tick高频交易策略.py`** — TICK 模式演示
-
-> 💡 所有 `*_高性能.py` 示例与普通版**交易逻辑完全一致**，仅指标获取方式替换为 `register_indicator`，是理解 v0.4.5 性能优化的最佳入口。
-
----
-
-## 🗂 项目结构
-
-```
-ssquant/
-├── ssquant/
-│   ├── api/strategy_api.py          # StrategyAPI（新增 ndarray / IndicatorCache 接口）
-│   ├── backtest/backtest_core.py    # 回测引擎（性能优化核心）
-│   ├── backtest/unified_runner.py   # 统一运行器（三模式入口）
-│   ├── backtest/live_trading_adapter.py  # 实盘/SIMNOW 桥接
-│   ├── data/data_source.py          # 数据源（ndarray 缓存 / 本地模式）
-│   ├── config/trading_config.py     # 账户与默认配置
-│   └── ctp/py39~py314/              # CTP 二进制（Windows/Linux）
-├── examples/                        # 25+ 示例策略（含高性能版）
-├── ai_agent/                        # AI 策略编写助手
-└── data_cache/                      # 本地 SQLite / 数据缓存
+```powershell
+python start_server.py
 ```
 
----
+访问：
 
-## 🌐 社区与主页
+```text
+http://localhost:5000
+```
 
-- **主页**：[quant789.com](https://quant789.com) — 松鼠俱乐部官网
-- **公众号**：**松鼠Quant** — 量化策略、框架更新、会员服务
-- **GitHub**：[github.com/songshuquant/ssquant](https://github.com/songshuquant/ssquant)
-- **Gitee**：[gitee.com/ssquant/ssquant](https://gitee.com/ssquant/ssquant)（国内镜像）
+v0.4.6 起，AI Agent 使用 waitress 生产服务器启动，不建议长期使用 Flask 开发服务器。
 
----
+主要能力：
 
-## 🖥 环境要求
+- OpenAI 兼容模型。
+- Claude 原生 API。
+- DeepSeek-R1 / Claude thinking 思考内容展示。
+- 图片和文本附件上传。
+- 自动运行、自动调试、自动迭代。
+- 强制停止运行中的策略进程。
+- 工作区、报告和策略历史管理。
 
-- **Python**: 3.9 ~ 3.14
-- **系统**: Windows 10+ / Linux (x86_64)
-- **CTP**: >= 6.7.7
-- **内存**: 4GB+
-
----
-
-## ⚠️ 风险提示
-
-本框架仅供学习研究。期货交易风险极高：
-
-- 先在 **SIMNOW** 充分测试（建议 ≥ 1 周）
-- 实盘前用小资金验证
-- 严格止损，勿用高杠杆
+升级 AI Agent 时请注意：`settings.json`、`history.json`、`workspaces/`、`strategies/` 是运行数据，不建议直接覆盖。
 
 ---
 
-## 📄 License
+## 推荐示例
 
-[MIT](LICENSE) — 自由使用、修改和分发。
+`examples/` 是 SSQuant 最重要的上手保障之一。
+
+新手不要一开始就让 AI 从零写复杂策略。正确顺序是：
+
+1. 先安装框架。
+2. 先导入或配置好数据。
+3. 先跑通 `examples/` 中最接近自己需求的示例策略。
+4. 再在示例基础上改参数、改信号、改仓位管理。
+5. 最后再让 AI 帮你扩展成自己的策略。
+
+这些示例不是装饰文件，而是框架能力的可运行样板。它们覆盖了期货市场中大约 80% 常见策略类型：趋势跟踪、均值回归、网格、套利、跨周期过滤、截面轮动、机器学习、加减仓、正反手、Tick 高频、期权组合、订单流、自动换月和数据工具。
+
+对新手来说，跑通示例有三个作用：
+
+- 验证安装、数据、账号、报告生成是否正常。
+- 学会 SSQuant 的标准策略结构和 `StrategyAPI` 用法。
+- 给 AI 一个可靠模板，避免生成不符合框架约定的代码。
+
+### 示例分类
+
+| 示例 | 用途 |
+|---|---|
+| `examples/A_工具_导入数据库DB示例.py` | 本地数据导入，local 模式第一步 |
+| `examples/A_工具_数据库管理_查看与删除.py` | 查看和清理本地 SQLite 数据 |
+| `examples/A_CTP连接状态监测测试_真实断网.py` | CTP 连接状态和断网恢复测试 |
+| `examples/A_撤单重发示例.py` | 撤单、重发、追单链路示例 |
+| `examples/A_穿透式测试脚本.py` | CTP 穿透式监管相关测试 |
+| `examples/B_双均线策略_高性能.py` | 高性能策略入门 |
+| `examples/B_海龟交易策略_高性能.py` | 唐奇安通道策略 |
+| `examples/B_十大经典策略之Aberration_高性能.py` | 经典通道突破策略 |
+| `examples/B_日内交易策略.py` | 日内交易模板 |
+| `examples/B_网格交易策略.py` | 网格交易 |
+| `examples/B_加仓策略_高性能.py` | 趋势加仓 |
+| `examples/B_减仓策略_高性能.py` | 分批减仓 |
+| `examples/B_正反手策略_高性能.py` | 多空反转 |
+| `examples/B_正反手混合开平仓策略_高性能.py` | 正反手与混合开平仓 |
+| `examples/B_多品种多周期交易策略_高性能.py` | 多品种、多周期 |
+| `examples/B_自动参数示例.py` | 参数优化 |
+| `examples/B_多品种多周期交易策略_参数优化.py` | 多品种多周期参数优化 |
+| `examples/B_自动换月示例.py` | 主力连续合约自动换月 |
+| `examples/B_跨周期过滤策略_高性能.py` | 大周期过滤小周期交易 |
+| `examples/B_跨品种套利策略_高性能.py` | 跨品种套利 |
+| `examples/B_跨期套利策略_高性能.py` | 跨期套利 |
+| `examples/B_强弱截面轮动策略_高性能.py` | 截面强弱轮动 |
+| `examples/B_机器学习策略_随机森林_高性能.py` | 机器学习策略 |
+| `examples/C_纯Tick高频交易策略.py` | Tick 回测 |
+| `examples/C_纯Tick限价单交易策略.py` | Tick 限价单交易 |
+| `examples/C_期权交易策略.py` | 期权交易 |
+| `examples/C_期货期权组合策略.py` | 期货期权组合 |
+| `examples/D_订单流与深度数据_data_server模式.py` | 订单流和深度数据 |
+
+### 推荐阅读顺序
+
+如果你是第一次使用 SSQuant，建议按这个顺序：
+
+1. `A_工具_导入数据库DB示例.py`
+2. `B_双均线策略_高性能.py`
+3. `B_海龟交易策略_高性能.py`
+4. `B_多品种多周期交易策略_高性能.py`
+5. `B_自动参数示例.py`
+6. 再根据自己的方向选择套利、Tick、期权、机器学习或订单流示例。
+
+所有生产策略建议优先参考 `*_高性能.py` 写法。
+
+AI 生成策略时，也应该优先模仿这些示例的结构：`initialize(api)` 注册指标，`strategy(api)` 中 O(1) 查询，交易只通过 `StrategyAPI` 完成。
+
+---
+
+## 关键文件
+
+| 需求 | 文件 |
+|---|---|
+| 策略 API | `ssquant/api/strategy_api.py` |
+| 回测主循环 | `ssquant/backtest/backtest_core.py` |
+| 三模式统一入口 | `ssquant/backtest/unified_runner.py` |
+| 实盘/SIMNOW 桥接 | `ssquant/backtest/live_trading_adapter.py` |
+| 数据源 | `ssquant/data/data_source.py` |
+| 远程数据和缓存 | `ssquant/data/api_data_fetcher.py` |
+| 本地复权 | `ssquant/data/local_adjust.py` |
+| 配置生成 | `ssquant/config/config_helpers.py` |
+| 默认配置 | `ssquant/config/trading_config.py` |
+| AI Agent | `ai_agent/` |
+| v0.4.6 更新日志 | `046.MD` |
+
+---
+
+## 升级到 v0.4.6
+
+建议分阶段升级：
+
+1. 先替换 `ssquant/`。
+2. 跑不复权回测，确认结果基本稳定。
+3. 跑后复权/前复权连续合约回测，确认报告中有 `raw_price` 映射真实价。
+4. 再替换 AI Agent 代码。
+5. 备份并合并 `ai_agent/settings.json`、`history.json`、`workspaces/`、`strategies/`。
+
+重点验证：
+
+- 不复权回测。
+- 复权连续合约回测。
+- 多品种多周期回测。
+- HTML 报告。
+- SIMNOW/实盘平今平昨。
+- AI Agent `python start_server.py`。
+
+---
+
+## 常见问题
+
+### 回测没有数据
+
+检查：
+
+- `data_source_mode` 是否正确。
+- 远程模式账号是否配置。
+- 本地模式是否已经导入数据。
+- 合约、周期、日期范围是否存在数据。
+
+### Tick 回测为什么报错
+
+Tick 回测必须使用：
+
+```python
+data_source_mode="local"
+```
+
+### 复权回测结果为什么和 v0.4.5 不一样
+
+v0.4.6 通过价格双轨制把复权价映射回真实价格，并用真实价格计算回测指标，这是预期修正。
+
+### AI Agent 为什么要用 `start_server.py`
+
+`start_server.py` 使用 waitress，能改善 Windows 下长时间运行、后台切换和 SSE 连接不稳定的问题。
+
+---
+
+## 许可证与风险提示
+
+SSQuant 使用 MIT License。
+
+期货交易具有高风险。SSQuant 是研究和工程框架，不构成投资建议。实盘前请充分回测和 SIMNOW 验证，并从小资金开始。

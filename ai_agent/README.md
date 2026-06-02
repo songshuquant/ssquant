@@ -1,218 +1,243 @@
 # SSQuant AI Agent
 
-🚀 **驱动式AI量化策略编写智能体**
+> 版本：v0.4.6
+> 协议：MIT
 
-> ⚠️ **重要提示**：`ai_agent` 目录必须位于 `ssquant-main` 项目根目录下，不可单独移动到其他位置。
-> 
-> AI Agent 依赖 SSQuant 框架的回测引擎、数据接口和配置文件，目录结构如下：
-> ```
-> ssquant-main/           # 项目根目录
-> ├── ai_agent/           # AI Agent（本目录）
-> ├── ssquant/            # SSQuant 核心框架（必需）
-> ├── backtest_results/   # 回测报告输出目录
-> ├── backtest_logs/      # 回测日志目录
-> └── examples/           # 示例策略
-> ```
+SSQuant AI Agent 是 SSQuant 的本地策略开发助手。它用浏览器界面连接大模型，帮助用户生成策略、修改策略、运行回测、查看报告、分析错误，并围绕工作区保存一次策略开发过程。
 
-## 功能特性
+它不是独立量化框架，所有策略运行、回测指标、数据源、复权和交易接口都以仓库根目录的 SSQuant v0.4.6 为准。
 
-### 三栏式布局
-- **左侧 - 策略代码编辑器**: 基于Monaco Editor，支持语法高亮、差异对比（红绿色显示代码变化）
-- **中间 - AI助手对话**: 支持自然语言交互，自动提取代码
-- **右侧 - 回测报告与设置**: 查看报告、历史版本、配置参数
+---
 
-### 核心功能
-1. **AI驱动策略生成**: 用自然语言描述需求，AI自动生成完整策略代码
-2. **一键回测**: 直接运行策略，实时查看回测输出
-3. **智能分析**: AI自动分析回测报告，给出改进建议
-4. **自动迭代**: 开启AUTO模式，AI自动优化策略直到达到目标
+## 核心能力
 
-### AUTO模式
-- **自动回测**: 生成策略后自动运行回测
-- **自动调试**: 回测完成后自动分析报告
-- **自动迭代**: 根据分析结果自动优化策略（可设置迭代次数）
+| 能力 | 说明 |
+|------|------|
+| 策略生成 | 根据中文需求生成 SSQuant 策略代码 |
+| 示例优先 | 系统提示词要求 AI 优先参考 `examples/` 高性能示例 |
+| 回测执行 | 后端保存临时策略文件并用子进程运行回测 |
+| 实时日志 | 使用 SSE 推送回测状态和运行日志 |
+| 报告管理 | 自动发现 `backtest_results/` 下的 HTML 报告 |
+| 报告分析 | 将回测报告交给 AI 分析并生成改进建议 |
+| 自动流程 | 支持自动运行、自动调试、自动迭代 |
+| 工作区 | 按工作区保存聊天、策略、报告关联关系 |
+| 多模型 | 支持 OpenAI 兼容接口和 Claude 原生 API |
+| 思考模式 | 支持 DeepSeek R1 / QwQ 文本思考流，也支持 Claude thinking 参数注入 |
 
-## 快速开始
+---
 
-### 0. 前置条件
+## v0.4.6 重点
 
-**确保目录结构正确**：`ai_agent` 必须位于 `ssquant-main` 根目录下
+- 系统提示词已升级到 SSQuant v0.4.6。
+- 策略生成必须围绕 `StrategyAPI`，优先使用 `initialize(api)` + `api.register_indicator()`。
+- 连续合约只写 `888` 主力、`777` 次主力，不写 `000`。
+- 复权说明统一为价格双轨制：复权策略价映射真实价格，用真实价格计算回测指标。
+- `examples/` 是新手和 AI 的第一参考，覆盖约 80% 常见期货策略类型。
+- 后端入口从旧 `app.py` 切换为 `backend.py`，启动脚本为 `start_server.py`。
+- 运行时状态不提交仓库：`settings.json`、`history.json`、`report_metadata.json`、`strategies/`、`workspaces/` 会在启动或使用时自动生成。
 
-```bash
-# 正确的目录结构
-ssquant-main/
-├── ai_agent/        ← 你现在在这里
-├── ssquant/         ← 必需：SSQuant 核心框架
-├── data_cache/      ← 数据缓存目录
-└── ...
-```
-
-**配置俱乐部账号**：在 `ssquant/config/trading_config.py` 中填写：
-```python
-API_USERNAME = "你的俱乐部账号(手机号/邮箱)"
-API_PASSWORD = "你的俱乐部密码(注意：不是AI模型的API Key)"
-```
-
-### 1. 安装依赖
-
-```bash
-# 进入 ai_agent 目录
-cd ssquant-main/ai_agent
-
-# 安装依赖（国内推荐使用镜像加速）
-pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
-```
-
-### 2. 配置 AI 模型 API Key
-
-启动应用后，点击右上角 ⚙️ 设置按钮，配置：
-- **API 接口地址**: 大模型服务的 API 地址（支持 OpenAI 兼容格式）
-- **API Key**: 你的 API 密钥
-- **模型**: deepseek-chat / gpt-4 / claude-3-opus 等
-- **Temperature**: 控制生成的随机性 (0-2)
-
-**支持的 AI 服务商**：
-- DeepSeek（推荐，性价比高）
-- OpenAI（ChatGPT、GPT-4）
-- 智谱AI（GLM-4）
-- 月之暗面（Moonshot/Kimi）
-- 通义千问（Qwen）
-- 其他兼容 OpenAI API 格式的服务
-
-### 3. 启动应用
-
-```bash
-# 确保在 ai_agent 目录下
-cd ssquant-main/ai_agent
-
-# 启动服务
-python app.py
-```
-
-访问 http://localhost:5000
-
-## 使用流程
-
-### 生成策略
-1. 在中间对话框输入策略需求，例如：
-   - "给我写一个双均线策略"
-   - "生成一个海龟突破策略，使用20日突破入场"
-   - "写一个MACD+RSI组合策略"
-
-2. AI返回策略代码后，代码自动显示在左侧编辑器
-
-### 运行回测
-1. 在右侧"参数"标签配置回测参数
-2. 点击左下角"▶️ 运行回测"
-3. 在运行日志中查看实时输出
-4. 回测完成后自动显示报告
-
-### 优化迭代
-1. 点击报告下方"让AI分析"
-2. AI会分析报告并给出改进建议
-3. 如果有建议代码，点击"应用代码"
-4. 继续运行回测验证效果
-
-### 版本管理
-- 点击右侧"历史"标签查看所有版本
-- 每次运行回测会自动保存版本
-- 可以加载历史版本代码或查看对应报告
+---
 
 ## 目录结构
 
-```
-ssquant-main/                    # 项目根目录
-├── ai_agent/                    # AI Agent 目录
-│   ├── app.py                   # Flask 后端主程序
-│   ├── requirements.txt         # Python 依赖
-│   ├── settings.json            # 用户设置（自动生成）
-│   ├── history.json             # 历史记录（自动生成）
-│   ├── templates/
-│   │   └── index.html           # 前端页面
-│   ├── strategies/              # AI 生成的策略保存目录
-│   └── workspaces/              # 工作区数据目录
-│
-├── ssquant/                     # SSQuant 核心框架（必需）
-│   ├── backtest/                # 回测引擎
-│   ├── config/                  # 配置文件（含 trading_config.py）
-│   └── ...
-│
-├── backtest_results/            # 回测报告输出目录
-├── backtest_logs/               # 回测日志目录
-├── data_cache/                  # 数据缓存目录
-└── examples/                    # 示例策略
+```text
+ai_agent/
+├── backend.py             # Flask 后端主程序
+├── start_server.py        # waitress 启动脚本
+├── prompt.py              # SSQuant v0.4.6 系统提示词
+├── requirements.txt       # AI Agent 依赖
+├── README.md              # 本文档
+├── templates/
+│   └── index.html         # 前端单页界面
+└── static/
+    └── node_modules/      # 前端依赖资源
 ```
 
-## 技术栈
+运行后会自动生成：
 
-- **后端**: Flask + Threading (非阻塞)
-- **前端**: HTML5 + CSS3 + JavaScript
-- **代码编辑器**: Monaco Editor
-- **Markdown渲染**: Marked.js
-- **AI接口**: 支持DeepSeek/OpenAI/Claude
+```text
+ai_agent/
+├── settings.json          # 本机模型和回测参数设置
+├── history.json           # 策略历史记录
+├── report_metadata.json   # 报告与工作区映射
+├── strategies/            # AI 生成或回测用的策略文件
+└── workspaces/            # 工作区 JSON 文件
+```
 
-## 配置说明
+这些运行时文件已在 `.gitignore` 中忽略。
 
-### LLM设置
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| Provider | AI提供商 | DeepSeek |
-| Model | 模型名称 | deepseek-chat |
-| Temperature | 生成随机性 | 0.7 |
+---
 
-### 优化目标
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| 最小交易次数 | 策略有效性验证 | 10 |
-| 目标夏普比率 | 风险调整收益 | 1.5 |
-| 目标胜率 | 盈利交易比例 | 45% |
-| 最大回撤限制 | 风险控制 | 20% |
+## 安装与启动
 
-### 回测参数
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| 初始资金 | 回测起始资金 | 1,000,000 |
-| 手续费率 | 交易成本 | 0.0001 |
-| 保证金率 | 期货保证金 | 10% |
-| 合约乘数 | 合约价值倍数 | 10 |
-| 最小变动价位 | 价格精度 | 1 |
-| 滑点跳数 | 成交滑点 | 1 |
+在仓库根目录先安装 SSQuant：
+
+```powershell
+pip install -e .
+```
+
+安装 AI Agent 依赖：
+
+```powershell
+cd ai_agent
+pip install -r requirements.txt
+```
+
+启动服务：
+
+```powershell
+python start_server.py
+```
+
+浏览器访问：
+
+```text
+http://localhost:5000
+```
+
+---
+
+## 模型配置
+
+打开页面右上角设置，填写：
+
+| 配置项 | 说明 |
+|--------|------|
+| Provider | DeepSeek / OpenAI / Claude / Qwen / Moonshot / Zhipu / Custom |
+| API 接口地址 | OpenAI 兼容接口或 Claude 原生接口 |
+| 模型名称 | 如 `deepseek-chat`、`gpt-4o`、`claude-3-7-sonnet-20250219` |
+| API Key | 模型服务商密钥，只保存在本机 `settings.json` |
+| Temperature | 生成随机性 |
+| 额外参数 | 透传给模型 API 的 JSON 参数 |
+| 思考模式 | 允许显示/处理模型思考内容，并延长超时时间 |
+| 思考链期望长度 | Claude 模式会映射为 `thinking.budget_tokens` |
+| 回复最大长度 | 透传 `max_tokens` |
+
+Claude 原生 API 需要安装 `anthropic`，已写入 `requirements.txt`。
+
+---
+
+## 回测参数
+
+右侧设置区会写入回测参数，包括：
+
+| 参数 | 说明 |
+|------|------|
+| 合约代码 | 常用 `rb888`、`au888`；连续合约只用 `888/777` |
+| K线周期 | 如 `1m`、`5m`、`15m`、`1h`、`1d` |
+| 日期范围 | `start_date` / `end_date` |
+| 复权类型 | `0` 不复权、`1` 后复权、`2` 前复权 |
+| 初始资金 | `initial_capital` |
+| 手续费率 | `commission` |
+| 保证金率 | `margin_rate` |
+| 合约乘数 | `contract_multiplier` |
+| 最小变动价位 | `price_tick` |
+| 滑点跳数 | `slippage_ticks` |
+| 回溯窗口 | `lookback_bars` |
+
+TICK 回测必须使用本地数据模式。实际数据账号、本地模式、SIMNOW 和实盘 CTP 账户配置位置，请以根目录 `README.md` 和 `SKILL.md` 为准。
+
+---
+
+## 自动流程
+
+页面右下角有三个自动化开关：
+
+| 开关 | 作用 |
+|------|------|
+| 自动运行 | AI 生成策略后自动启动回测 |
+| 自动调试 | 回测报错后把错误交给 AI 修复 |
+| 自动迭代 | 回测成功后分析报告并继续优化 |
+
+典型流程：
+
+```text
+用户描述策略
+  -> AI 生成策略代码
+  -> 保存到 ai_agent/strategies/
+  -> 子进程运行回测
+  -> 生成 backtest_results/*.html
+  -> 前端展示报告
+  -> AI 分析报告并继续优化
+```
+
+---
+
+## 后端接口速查
+
+| 接口 | 作用 |
+|------|------|
+| `GET /` | 打开前端页面 |
+| `POST /api/chat/stream` | 流式 AI 对话 |
+| `POST /api/chat/stop` | 停止 AI 输出 |
+| `GET/POST /api/strategy` | 获取或更新当前策略 |
+| `POST /api/backtest/start` | 启动回测 |
+| `GET /api/backtest/status` | 轮询回测状态 |
+| `POST /api/backtest/stop` | 停止回测 |
+| `GET /api/reports` | 列出回测报告 |
+| `GET /api/report/<filename>` | 查看报告 |
+| `DELETE /api/report/<filename>` | 删除报告 |
+| `GET/POST /api/settings` | 读取或保存设置 |
+| `GET /api/history` | 查看策略历史 |
+| `POST /api/history/save` | 保存策略历史 |
+| `GET /api/examples` | 列出示例策略 |
+| `GET /api/example/<filename>` | 读取示例策略 |
+| `GET /api/workspaces` | 列出工作区 |
+| `POST /api/workspace` | 创建工作区 |
+| `GET/PUT/DELETE /api/workspace/<id>` | 读取、更新、删除工作区 |
+
+---
 
 ## 常见问题
 
-### Q: 提示"俱乐部鉴权失败"？
-1. 检查 `ssquant/config/trading_config.py` 中的俱乐部账号(`API_USERNAME`)和俱乐部密码(`API_PASSWORD`)是否正确
-2. 确保账号已开通 AI 助手权限
-3. 重启 AI Agent 服务
+### 启动后没有 `settings.json`
 
-### Q: 提示找不到 ssquant 模块？
-**确保 `ai_agent` 目录位于 `ssquant-main` 根目录下**，不能单独复制到其他位置使用。
-```bash
-# 正确结构
-ssquant-main/
-├── ai_agent/     ← AI Agent
-└── ssquant/      ← 必须存在
+正常。首次启动 `backend.py` 会自动创建默认设置文件。
+
+### `strategies/` 和 `workspaces/` 不存在
+
+正常。启动后会自动创建，使用过程中会写入策略和工作区文件。
+
+### Claude 报 `No module named anthropic`
+
+重新安装依赖：
+
+```powershell
+cd ai_agent
+pip install -r requirements.txt
 ```
 
-### Q: 回测没有输出？
-1. 检查策略代码是否完整，确保包含 `if __name__ == "__main__":` 和运行器配置
-2. 检查控制台是否有错误信息
+### 回测没有数据
 
-### Q: AI无法响应？
-1. 检查 API Key 是否正确
-2. 检查 API 接口地址是否正确
-3. 检查网络连接
-4. 查看控制台错误信息
+先确认根目录 SSQuant 数据源配置。本地模式需要先导入 SQLite 数据；远程 `data_server` 模式需要俱乐部数据账号。
 
-### Q: 报告无法显示？
-确保 `backtest_results` 目录存在且有生成的 HTML 报告。
+### 生成的策略质量不稳定
 
-## 更新日志
+先让 AI 读取并参考 `examples/` 中最接近的高性能示例，再生成策略。新手也应该先手动跑通示例策略。
 
-### v1.0.0 (2026-01-10)
-- 🎉 首次发布
-- ✨ 三栏式布局
-- ✨ Monaco代码编辑器+差异对比
-- ✨ AI对话+自动回测+自动迭代
-- ✨ 版本历史管理
+---
 
+## 发布注意
+
+提交 GitHub 时应包含产品代码和文档：
+
+```text
+ai_agent/backend.py
+ai_agent/start_server.py
+ai_agent/prompt.py
+ai_agent/templates/index.html
+ai_agent/requirements.txt
+ai_agent/README.md
+```
+
+不应提交本机运行状态：
+
+```text
+ai_agent/settings.json
+ai_agent/history.json
+ai_agent/report_metadata.json
+ai_agent/strategies/
+ai_agent/workspaces/
+```
+
+期货交易具有高风险，历史回测业绩不代表未来表现。
