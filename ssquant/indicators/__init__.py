@@ -1,1 +1,1 @@
-"""Technical indicators package."""
+"""技术指标模块"""

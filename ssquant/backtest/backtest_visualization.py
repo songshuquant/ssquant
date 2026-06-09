@@ -537,12 +537,17 @@ class BacktestVisualizer:
             lc = LineCollection(segments, colors=colors, linewidths=0.8, capstyle='butt')
             ax.add_collection(lc)
 
-            # 实体：向量化 bar
+            # 实体：向量化粗竖线 LineCollection（替代 ax.bar，避免 10 万+ Patch 对象开销）
             nonzero = body_heights >= 1e-9
             if np.any(nonzero):
-                ax.bar(x[nonzero], body_heights[nonzero], width=body_width,
-                       bottom=body_bottoms[nonzero], color=colors[nonzero],
-                       edgecolor=colors[nonzero], linewidth=0.5, align='center')
+                body_segments = np.empty((int(np.count_nonzero(nonzero)), 2, 2))
+                body_segments[:, 0, 0] = x[nonzero]
+                body_segments[:, 0, 1] = body_bottoms[nonzero]
+                body_segments[:, 1, 0] = x[nonzero]
+                body_segments[:, 1, 1] = body_bottoms[nonzero] + body_heights[nonzero]
+                body_lc = LineCollection(body_segments, colors=colors[nonzero],
+                                         linewidths=3.5, capstyle='butt', antialiaseds=True)
+                ax.add_collection(body_lc)
             # 十字星横线
             zmask = ~nonzero
             if np.any(zmask):
@@ -552,7 +557,7 @@ class BacktestVisualizer:
                 zseg[:, 0, 1] = opens[zidx]
                 zseg[:, 1, 0] = x[zidx] + body_width / 2
                 zseg[:, 1, 1] = opens[zidx]
-                lc_zero = LineCollection(zseg, colors=colors[zmask], linewidths=1.0)
+                lc_zero = LineCollection(zseg, colors=colors[zmask], linewidths=2.0)
                 ax.add_collection(lc_zero)
 
             # ---------- 5. 标记最高/最低点 ----------
@@ -680,7 +685,10 @@ class BacktestVisualizer:
             fig.savefig(chart_path, dpi=100)
             plt.close(fig)
 
-            self.log(f"K线和交易图已保存到: {chart_path}")
+            if hasattr(chart_path, 'getvalue'):
+                self.log("K线和交易图已写入内存缓冲区")
+            else:
+                self.log(f"K线和交易图已保存到: {chart_path}")
             return True
 
         except Exception as e:
