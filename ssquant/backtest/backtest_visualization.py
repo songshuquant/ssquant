@@ -511,7 +511,7 @@ class BacktestVisualizer:
 
             # 建立 datetime -> 最近K线索引的映射（用于交易信号定位）
             # 使用 numpy searchsorted 进行高效二分查找
-            kline_ts = dates.view('int64').values
+            kline_ts = dates.to_numpy(dtype='datetime64[ns]').astype(np.int64, copy=False)
 
             # ---------- 3. 创建画布 ----------
             fig, ax = plt.subplots(figsize=(16, 9))
@@ -607,11 +607,17 @@ class BacktestVisualizer:
                 if marker is None:
                     continue
 
-                offset_dir = 1 if '开' in action else -1
-                y_offset = (highs[idx] - lows[idx]) * 0.15 * offset_dir
-                if y_offset < 1e-9:
-                    y_offset = hl_range * 0.01 * offset_dir
-                y_pos = price + y_offset
+                # 多头开仓/空头平仓置于K线下方；其余信号置于上方。
+                below_actions = {'开多', '买多', '平空', '买空', '平空开多'}
+                offset_dir = -1 if action in below_actions else 1
+                local_range = float(highs[idx] - lows[idx])
+                offset_size = abs(local_range) * 0.15
+                if offset_size < 1e-9:
+                    offset_size = max(abs(float(hl_range)) * 0.0005, 1e-9)
+                if offset_dir < 0:
+                    y_pos = min(price, float(lows[idx])) - offset_size
+                else:
+                    y_pos = max(price, float(highs[idx])) + offset_size
 
                 trade_groups.setdefault(marker, []).append((float(x[idx]), float(y_pos), color))
 
@@ -619,7 +625,7 @@ class BacktestVisualizer:
                     net_profit = float(trade['net_profit'])
                     profit_text = f"+{net_profit:.2f}" if net_profit > 0 else f"{net_profit:.2f}"
                     text_color = up_color if net_profit > 0 else down_color
-                    va = 'bottom' if offset_dir < 0 else 'top'
+                    va = 'top' if offset_dir < 0 else 'bottom'
                     profit_texts.append((float(x[idx]), float(y_pos), profit_text, text_color, va))
 
             for marker, pts in trade_groups.items():
