@@ -25,8 +25,10 @@ def check_module_exists(module_name):
     try:
         importlib.import_module(module_name)
         return True
-    except ImportError:
-        return False
+    except ModuleNotFoundError as exc:
+        if exc.name == module_name:
+            return False
+        raise
 
 def get_module_path(module_name):
     """
@@ -57,8 +59,10 @@ def check_function_exists(module_name, function_name):
     try:
         module = importlib.import_module(module_name)
         return hasattr(module, function_name)
-    except ImportError:
-        return False
+    except ModuleNotFoundError as exc:
+        if exc.name == module_name:
+            return False
+        raise
 
 def check_data_modules():
     """
@@ -75,10 +79,10 @@ def check_data_modules():
     
     # 检查模块是否存在
     modules_to_check = [
-        "data.data_source",
-        "data.api_data_fetcher",
-        "data.multi_data_fetcher",
-        "api.strategy_api"
+        "ssquant.data.data_source",
+        "ssquant.data.api_data_fetcher",
+        "ssquant.data.multi_data_fetcher",
+        "ssquant.api.strategy_api"
     ]
     
     for module in modules_to_check:
@@ -87,9 +91,9 @@ def check_data_modules():
     
     # 检查关键函数是否存在
     function_checks = [
-        ("data.api_data_fetcher", "get_futures_data"),
-        ("data.multi_data_fetcher", "fetch_multiple_data"),
-        ("api.strategy_api", "create_strategy_api")
+        ("ssquant.data.api_data_fetcher", "get_futures_data"),
+        ("ssquant.data.multi_data_fetcher", "fetch_multiple_data"),
+        ("ssquant.api.strategy_api", "create_strategy_api")
     ]
     
     for module, function in function_checks:
@@ -133,4 +137,4 @@ def print_debug_info():
     print("\n========== 检查完成 ==========")
 
 if __name__ == "__main__":
-    print_debug_info() 
+    print_debug_info()
