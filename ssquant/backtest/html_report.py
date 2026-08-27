@@ -12,6 +12,8 @@ from typing import Dict, List, Any, Optional
 import pandas as pd
 import numpy as np
 
+from .trade_position import format_position, resolve_trade_positions
+
 # 自定义JSON编码器，处理NumPy和pandas数据类型
 class NumpyEncoder(json.JSONEncoder):
     """处理 NumPy/pandas 数据类型的 JSON 序列化
@@ -2583,41 +2585,46 @@ class HTMLReportGenerator:
 
             # 提取交易标记（统一为 Lightweight Charts™ marker 格式）
             trades = result.get('trades', [])
+            trade_positions = resolve_trade_positions(trades)
             markers = []
 
-            def _add_marker(ts, action, price, volume, raw_suffix=''):
+            def _add_marker(ts, action, price, volume, position_after, raw_suffix=''):
                 _tooltip = f"{action} {volume}手 @ {float(price):.2f}"
                 if raw_suffix:
                     _tooltip += raw_suffix
+                _position_text = format_position(position_after, compact=True)
+                _position_detail = format_position(position_after)
+                if _position_detail:
+                    _tooltip += f"｜成交后仓位：{_position_detail}"
                 if action == '开多':
                     markers.append({
                         'time': ts, 'position': 'belowBar', 'color': '#4caf50',
-                        'shape': 'arrowUp', 'text': '', 'size': 2, 'tooltip': _tooltip
+                        'shape': 'arrowUp', 'text': _position_text, 'size': 2, 'tooltip': _tooltip
                     })
                 elif action == '平空':
                     markers.append({
                         'time': ts, 'position': 'belowBar', 'color': '#4caf50',
-                        'shape': 'arrowUp', 'text': '', 'size': 2, 'tooltip': _tooltip
+                        'shape': 'arrowUp', 'text': _position_text, 'size': 2, 'tooltip': _tooltip
                     })
                 elif action == '平空开多':
                     markers.append({
                         'time': ts, 'position': 'belowBar', 'color': '#00bcd4',
-                        'shape': 'circle', 'text': '', 'size': 2, 'tooltip': _tooltip
+                        'shape': 'circle', 'text': _position_text, 'size': 2, 'tooltip': _tooltip
                     })
                 elif action == '开空':
                     markers.append({
                         'time': ts, 'position': 'aboveBar', 'color': '#f44336',
-                        'shape': 'arrowDown', 'text': '', 'size': 2, 'tooltip': _tooltip
+                        'shape': 'arrowDown', 'text': _position_text, 'size': 2, 'tooltip': _tooltip
                     })
                 elif action == '平多':
                     markers.append({
                         'time': ts, 'position': 'aboveBar', 'color': '#f44336',
-                        'shape': 'arrowDown', 'text': '', 'size': 2, 'tooltip': _tooltip
+                        'shape': 'arrowDown', 'text': _position_text, 'size': 2, 'tooltip': _tooltip
                     })
                 elif action == '平多开空':
                     markers.append({
                         'time': ts, 'position': 'aboveBar', 'color': '#ff9800',
-                        'shape': 'circle', 'text': '', 'size': 2, 'tooltip': _tooltip
+                        'shape': 'circle', 'text': _position_text, 'size': 2, 'tooltip': _tooltip
                     })
 
             # reverse_pos 拆成两腿的合并处理
@@ -2656,20 +2663,30 @@ class HTMLReportGenerator:
                     if a1 == '平多' and a2 == '开空':
                         paired_leg_indices.add(ia)
                         paired_leg_indices.add(ib)
-                        _tooltip = f"平多开空 {vol}手 @ {px:.2f}{_raw_suffix_pair}"
+                        _position_text = format_position(trade_positions[ib], compact=True)
+                        _position_detail = format_position(trade_positions[ib])
+                        _tooltip = (
+                            f"平多开空 {vol}手 @ {px:.2f}{_raw_suffix_pair}"
+                            f"｜成交后仓位：{_position_detail}"
+                        )
                         markers.append({
                             'time': t1, 'position': 'aboveBar', 'color': '#ff9800',
-                            'shape': 'circle', 'text': '', 'size': 2, 'tooltip': _tooltip
+                            'shape': 'circle', 'text': _position_text, 'size': 2, 'tooltip': _tooltip
                         })
                         k += 2
                         continue
                     if a1 == '平空' and a2 == '开多':
                         paired_leg_indices.add(ia)
                         paired_leg_indices.add(ib)
-                        _tooltip = f"平空开多 {vol}手 @ {px:.2f}{_raw_suffix_pair}"
+                        _position_text = format_position(trade_positions[ib], compact=True)
+                        _position_detail = format_position(trade_positions[ib])
+                        _tooltip = (
+                            f"平空开多 {vol}手 @ {px:.2f}{_raw_suffix_pair}"
+                            f"｜成交后仓位：{_position_detail}"
+                        )
                         markers.append({
                             'time': t1, 'position': 'belowBar', 'color': '#00bcd4',
-                            'shape': 'circle', 'text': '', 'size': 2, 'tooltip': _tooltip
+                            'shape': 'circle', 'text': _position_text, 'size': 2, 'tooltip': _tooltip
                         })
                         k += 2
                         continue
@@ -2688,7 +2705,11 @@ class HTMLReportGenerator:
                 _raw_suffix = f" (实际@{float(raw_price):.2f})" if _show_raw else ""
                 action = str(trade.get('action', '') or '').strip()
                 volume = trade.get('volume', 1)
-                _add_marker(ts, action, price, volume, _raw_suffix)
+                _add_marker(ts, action, price, volume, trade_positions[i], _raw_suffix)
+
+            # 反手合并标记会先于普通标记构建，输出前恢复为时间升序，满足
+            # Lightweight Charts 对 series markers 的顺序要求。
+            markers.sort(key=lambda marker: marker['time'])
 
             name = f"{result.get('symbol', '')} {kline_period}"
 

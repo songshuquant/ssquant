@@ -85,3 +85,34 @@ def test_static_chart_uses_small_local_fallback_for_zero_range_candle(monkeypatc
     marker_offsets = _trade_marker_offsets(ax)
     close_y = marker_offsets[marker_offsets[:, 0] == 0, 1].item()
     assert 100 < close_y < 101
+
+
+def test_static_reverse_markers_only_label_the_final_position(monkeypatch, tmp_path):
+    klines = pd.DataFrame(
+        {
+            "datetime": ["2026-01-01", "2026-01-02"],
+            "open": [100, 101],
+            "high": [110, 111],
+            "low": [90, 91],
+            "close": [105, 102],
+        }
+    )
+    _, ax = _render_price_chart(
+        monkeypatch,
+        tmp_path,
+        klines,
+        [
+            {"datetime": "2026-01-01", "price": 100, "action": "开多", "volume": 2},
+            {
+                "datetime": "2026-01-02", "price": 102, "action": "平多",
+                "volume": 2, "net_profit": 10,
+            },
+            {"datetime": "2026-01-02", "price": 102, "action": "开空", "volume": 2},
+        ],
+    )
+
+    labels = [text.get_text() for text in ax.texts]
+    assert "多2" in labels
+    assert "+10.00" in labels
+    assert "空2" in labels
+    assert "空仓" not in labels

@@ -8,6 +8,8 @@ from PIL import Image
 import matplotlib.image as mpimg
 from scipy.interpolate import make_interp_spline, interp1d
 
+from .trade_position import format_position, resolve_trade_positions
+
 # 设置matplotlib支持中文显示
 matplotlib.use('Agg')  # 使用Agg后端
 # 设置中文字体
@@ -587,9 +589,38 @@ class BacktestVisualizer:
             # 按 marker 分组，批量 scatter
             trade_groups = {}   # marker -> list of (x, y, color)
             profit_texts = []   # (x, y, text, color, va)
+            position_texts = [] # (x, y, text, color, va, y_offset_points)
             hl_range = max(highs) - min(lows)
+            trade_positions = resolve_trade_positions(trades)
 
-            for trade in trades:
+            # reverse_pos 会在同一时刻生成“先平仓、再反向开仓”两笔记录。
+            # 静态图保留两枚成交图标和第一腿盈亏，但只在第二腿显示最终仓位，
+            # 避免“空仓”和最终反向仓位文字重叠。
+            reverse_close_indices = set()
+            order_by_time = sorted(
+                range(len(trades)),
+                key=lambda i: (pd.to_datetime(trades[i].get('datetime'), errors='coerce'), i),
+            )
+            pair_idx = 0
+            reverse_pairs = {('平多', '开空'), ('平空', '开多')}
+            while pair_idx < len(order_by_time) - 1:
+                first_idx = order_by_time[pair_idx]
+                second_idx = order_by_time[pair_idx + 1]
+                first_trade = trades[first_idx]
+                second_trade = trades[second_idx]
+                first_time = pd.to_datetime(first_trade.get('datetime'), errors='coerce')
+                second_time = pd.to_datetime(second_trade.get('datetime'), errors='coerce')
+                actions = (
+                    str(first_trade.get('action', '') or '').strip(),
+                    str(second_trade.get('action', '') or '').strip(),
+                )
+                if first_time == second_time and actions in reverse_pairs:
+                    reverse_close_indices.add(first_idx)
+                    pair_idx += 2
+                else:
+                    pair_idx += 1
+
+            for trade_idx, trade in enumerate(trades):
                 if not all(k in trade for k in ('datetime', 'price', 'action')):
                     continue
                 trade_dt = pd.to_datetime(trade['datetime'])
@@ -627,6 +658,15 @@ class BacktestVisualizer:
                     text_color = up_color if net_profit > 0 else down_color
                     va = 'top' if offset_dir < 0 else 'bottom'
                     profit_texts.append((float(x[idx]), float(y_pos), profit_text, text_color, va))
+                position_text = '' if trade_idx in reverse_close_indices else format_position(
+                    trade_positions[trade_idx], compact=True
+                )
+                if position_text:
+                    va = 'top' if offset_dir < 0 else 'bottom'
+                    y_offset_points = -12 if offset_dir < 0 else 12
+                    position_texts.append((
+                        float(x[idx]), float(y_pos), position_text, color, va, y_offset_points
+                    ))
 
             for marker, pts in trade_groups.items():
                 xs, ys, cs = zip(*pts)
@@ -636,6 +676,13 @@ class BacktestVisualizer:
             for tx, ty, txt, tc, va in profit_texts:
                 ax.text(tx, ty, txt, color=tc, fontsize=8,
                         verticalalignment=va, horizontalalignment='center')
+
+            for tx, ty, txt, tc, va, y_offset_points in position_texts:
+                ax.annotate(
+                    txt, (tx, ty), xytext=(0, y_offset_points), textcoords='offset points',
+                    color=tc, fontsize=8, verticalalignment=va,
+                    horizontalalignment='center'
+                )
 
             # ---------- 7. X轴标签 ----------
             target_ticks = 10
