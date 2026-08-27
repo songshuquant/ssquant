@@ -15,6 +15,14 @@ class DebugUtilsImportProbeTests(unittest.TestCase):
             )
         )
 
+    def test_missing_parent_of_requested_module_returns_false(self):
+        module_name = "missing_debug_probe_parent.child"
+
+        self.assertFalse(debug_utils.check_module_exists(module_name))
+        self.assertFalse(
+            debug_utils.check_function_exists(module_name, "anything")
+        )
+
     def test_missing_dependency_inside_module_is_reraised(self):
         missing_dependency = ModuleNotFoundError(
             "No module named 'missing_debug_probe_dependency'",

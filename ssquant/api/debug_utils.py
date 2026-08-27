@@ -26,7 +26,7 @@ def check_module_exists(module_name):
         importlib.import_module(module_name)
         return True
     except ModuleNotFoundError as exc:
-        if exc.name == module_name:
+        if exc.name == module_name or module_name.startswith(f"{exc.name}."):
             return False
         raise
 
@@ -60,7 +60,7 @@ def check_function_exists(module_name, function_name):
         module = importlib.import_module(module_name)
         return hasattr(module, function_name)
     except ModuleNotFoundError as exc:
-        if exc.name == module_name:
+        if exc.name == module_name or module_name.startswith(f"{exc.name}."):
             return False
         raise
 
