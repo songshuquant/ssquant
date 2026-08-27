@@ -136,6 +136,10 @@ class ParameterOptimizer:
         self.optimization_metric = metric
         self.higher_is_better = higher_is_better
         return self
+
+    def _invalid_metric_value(self):
+        """Return a finite worst-case value so failed trials can never win."""
+        return -1e300 if self.higher_is_better else 1e300
         
     def grid_search(self, param_grid, parallel=False, n_jobs=-1, progress_log_interval=5, skip_final_report=False):
         """网格搜索优化
@@ -188,7 +192,7 @@ class ParameterOptimizer:
                 for params, metric_value, performance in results:
                     # 保存参数和结果
                     param_key = str(params)
-                    if metric_value is not None:  # 只处理非None结果
+                    if metric_value is not None and not performance.get('invalid_params'):
                         self.results[param_key] = {
                             'params': params,
                             'metric_value': metric_value,
@@ -374,7 +378,7 @@ class ParameterOptimizer:
                 for params, metric_value, performance in results:
                     # 保存参数和结果
                     param_key = str(params)
-                    if metric_value is not None:  # 只处理非None结果
+                    if metric_value is not None and not performance.get('invalid_params'):
                         self.results[param_key] = {
                             'params': params,
                             'metric_value': metric_value,
@@ -676,7 +680,7 @@ class ParameterOptimizer:
             # 如果指标不存在或为None，设置为0（无效值）
             if metric_value is None:
                 self.logger(f"警告: 参数 {params} 的{self.optimization_metric}为None")
-                metric_value = 0  # 使用0代替-Infinity
+                metric_value = self._invalid_metric_value()
                 # 设置一个有意义的性能数据
                 performance = {
                     'sharpe_ratio': 0,
@@ -691,7 +695,7 @@ class ParameterOptimizer:
                 metric_value = float(metric_value)
             except (TypeError, ValueError):
                 self.logger(f"警告: 参数 {params} 的{self.optimization_metric}不是数值类型: {metric_value}")
-                metric_value = 0  # 使用0代替-Infinity
+                metric_value = self._invalid_metric_value()
                 # 设置一个有意义的性能数据
                 performance = {
                     'sharpe_ratio': 0,
@@ -706,7 +710,7 @@ class ParameterOptimizer:
             
         except Exception as e:
             self.logger(f"评估参数 {params} 时出错: {str(e)}")
-            metric_value = 0  # 使用0代替-Infinity
+            metric_value = self._invalid_metric_value()
             # 设置一个有意义的性能数据
             performance = {
                 'sharpe_ratio': 0,
@@ -747,7 +751,7 @@ class ParameterOptimizer:
             # 如果指标不存在或为None，返回0（无效值）
             if metric_value is None:
                 self.logger(f"警告: 参数 {params} 的{self.optimization_metric}为None")
-                metric_value = 0  # 使用0代替-Infinity
+                metric_value = self._invalid_metric_value()
                 # 设置一个有意义的性能数据
                 performance = {
                     'sharpe_ratio': 0,
@@ -762,7 +766,7 @@ class ParameterOptimizer:
                 metric_value = float(metric_value)
             except (TypeError, ValueError):
                 self.logger(f"警告: 参数 {params} 的{self.optimization_metric}不是数值类型: {metric_value}")
-                metric_value = 0  # 使用0代替-Infinity
+                metric_value = self._invalid_metric_value()
                 # 设置一个有意义的性能数据
                 performance = {
                     'sharpe_ratio': 0,
@@ -775,11 +779,12 @@ class ParameterOptimizer:
             # 即使是负值，也保存结果并更新最优参数
             # 保存参数和结果
             param_key = str(params)
-            self.results[param_key] = {
-                'params': params,
-                'metric_value': metric_value,
-                'performance': performance
-            }
+            if not performance.get('invalid_params'):
+                self.results[param_key] = {
+                    'params': params,
+                    'metric_value': metric_value,
+                    'performance': performance
+                }
             
             # 保存到全局评估列表
             eval_result = {
@@ -793,13 +798,14 @@ class ParameterOptimizer:
             self.all_evaluated_params.append(eval_result)
             
             # 更新最优结果
-            self._update_best_result(params, metric_value)
+            if not performance.get('invalid_params'):
+                self._update_best_result(params, metric_value)
             
             return metric_value, performance
             
         except Exception as e:
             self.logger(f"评估参数 {params} 时出错: {str(e)}")
-            metric_value = 0  # 使用0代替-Infinity
+            metric_value = self._invalid_metric_value()
             # 设置一个有意义的性能数据
             performance = {
                 'sharpe_ratio': 0,
@@ -808,14 +814,6 @@ class ParameterOptimizer:
                 'win_rate': 0,
                 'error': str(e),  # 添加错误信息
                 'invalid_params': True  # 标记无效参数
-            }
-            
-            # 保存参数和结果
-            param_key = str(params)
-            self.results[param_key] = {
-                'params': params,
-                'metric_value': metric_value,
-                'performance': performance
             }
             
             # 保存到全局评估列表
@@ -1359,4 +1357,4 @@ class ParameterOptimizer:
             
         except Exception as e:
             self.logger(f"绘制优化结果时出错: {str(e)}")
-            return [] 
+            return []
