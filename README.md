@@ -273,6 +273,18 @@ api.buycover(volume=1)   # 平空
 api.close_all()          # 全部平仓
 ```
 
+SIMNOW/实盘模式还支持委托查询和撤单：
+
+```python
+api.query_orders()                 # 异步查询当日全部委托
+api.query_orders("rb2601")        # 查询指定合约委托
+api.cancel_order(order_sys_id)     # 按 OrderSysID 撤销单笔活动委托
+api.cancel_all_orders()            # 撤销当前数据源的全部活动委托
+```
+
+`query_orders()` 的结果通过 `runner.run(on_query_order=..., on_query_order_complete=...)`
+逐条返回。`OrderSysID` 可从 `on_order` 或 `on_query_order` 回调中取得。
+
 ### 数据接口
 
 ```python

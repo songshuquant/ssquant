@@ -1578,6 +1578,57 @@ class LiveDataSource:
             if log_callback:
                 log_callback(f"[reverse_pos] {self.symbol} 存在锁仓（多{long_pos}空{short_pos}），仅平仓不反转")
     
+    def cancel_order(self, order_sys_id: str, log_callback=None) -> bool:
+        """撤销指定的未成交订单。"""
+        if not self.ctp_client:
+            if log_callback:
+                log_callback("[错误] CTP客户端未初始化")
+            return False
+
+        normalized_id = str(order_sys_id or '').strip()
+        if not normalized_id:
+            if log_callback:
+                log_callback("[撤单] OrderSysID不能为空")
+            return False
+
+        matched_order = None
+        matched_key = None
+        for key, order in self.pending_orders.items():
+            current_id = order.get('OrderSysID') or key
+            if str(current_id).strip() == normalized_id:
+                matched_order = order
+                matched_key = key
+                break
+
+        if matched_order is None:
+            if log_callback:
+                log_callback(f"[撤单] {self.symbol} 未找到活动订单: {normalized_id}")
+            return False
+
+        order_status = matched_order.get('OrderStatus')
+        if order_status not in ['1', '3', 'a']:
+            if log_callback:
+                log_callback(
+                    f"[撤单] 订单 {normalized_id} 当前状态不可撤: {order_status}"
+                )
+            return False
+
+        instrument_id = matched_order.get('InstrumentID') or self.symbol
+        exchange_id = matched_order.get('ExchangeID', '')
+        if not exchange_id:
+            from ..pyctp.trader_api import _get_exchange_id
+            exchange_id = _get_exchange_id(instrument_id) or 'SHFE'
+
+        actual_order_sys_id = matched_order.get('OrderSysID') or matched_key
+        if log_callback:
+            log_callback(
+                f"[撤单] {instrument_id} 订单号={actual_order_sys_id} 交易所={exchange_id}"
+            )
+        self.ctp_client.cancel_order(
+            instrument_id, actual_order_sys_id, exchange_id
+        )
+        return True
+
     def cancel_all_orders(self, log_callback=None):
         """
         撤销所有未成交的订单
@@ -1669,7 +1720,9 @@ class LiveTradingAdapter:
                  on_position_complete_callback: Optional[Callable] = None,
                  on_disconnect_callback: Optional[Callable] = None,
                  on_query_trade_callback: Optional[Callable] = None,
-                 on_query_trade_complete_callback: Optional[Callable] = None):
+                 on_query_trade_complete_callback: Optional[Callable] = None,
+                 on_query_order_callback: Optional[Callable] = None,
+                 on_query_order_complete_callback: Optional[Callable] = None):
         """
         初始化实盘交易适配器
         
@@ -1690,6 +1743,8 @@ class LiveTradingAdapter:
             on_disconnect_callback: 用户自定义断开连接回调
             on_query_trade_callback: 用户自定义成交查询回调（单条）
             on_query_trade_complete_callback: 用户自定义成交查询完成回调
+            on_query_order_callback: 用户自定义委托查询回调（单条）
+            on_query_order_complete_callback: 用户自定义委托查询完成回调
         """
         self.mode = mode
         self.config = config
@@ -1707,6 +1762,8 @@ class LiveTradingAdapter:
         self.on_disconnect_callback = on_disconnect_callback
         self.on_query_trade_callback = on_query_trade_callback
         self.on_query_trade_complete_callback = on_query_trade_complete_callback
+        self.on_query_order_callback = on_query_order_callback
+        self.on_query_order_complete_callback = on_query_order_complete_callback
         
         # CTP客户端
         self.ctp_client: Optional[Union['SIMNOWClient', 'RealTradingClient']] = None
@@ -2079,6 +2136,8 @@ class LiveTradingAdapter:
             self.ctp_client.on_disconnected = self._on_disconnect
             self.ctp_client.on_query_trade = self._on_query_trade
             self.ctp_client.on_query_trade_complete = self._on_query_trade_complete
+            self.ctp_client.on_query_order = self._on_query_order
+            self.ctp_client.on_query_order_complete = self._on_query_order_complete
     
     def _init_data_source(self):
         """初始化数据源"""
@@ -2726,6 +2785,23 @@ class LiveTradingAdapter:
                 self.on_query_trade_complete_callback()
             except Exception as e:
                 print(f"[用户成交查询完成回调错误] {e}")
+
+    def _on_query_order(self, data: Dict):
+        """委托查询回调（单条记录）。"""
+        self._sync_pending_order(data, inherit_retry_state=False)
+        if self.on_query_order_callback:
+            try:
+                self.on_query_order_callback(data)
+            except Exception as e:
+                print(f"[用户委托查询回调错误] {e}")
+
+    def _on_query_order_complete(self):
+        """委托查询完成回调。"""
+        if self.on_query_order_complete_callback:
+            try:
+                self.on_query_order_complete_callback()
+            except Exception as e:
+                print(f"[用户委托查询完成回调错误] {e}")
     
     @staticmethod
     def _algo_order_lookup_keys(order_like: Dict) -> List[str]:
@@ -2913,6 +2989,52 @@ class LiveTradingAdapter:
         # 兜底：保留旧字段以兼容自定义/外部路径；_on_order 命中三元组时会主动清掉它防止双重继承
         ds._next_order_retry_count = retry_count + 1
     
+    def _sync_pending_order(
+        self, data: Dict, inherit_retry_state: bool = False
+    ) -> None:
+        """将活动委托同步到对应数据源，终态委托从缓存移除。"""
+        symbol = data.get('InstrumentID', '')
+        order_sys_id = data.get('OrderSysID', '')
+        order_status = data.get('OrderStatus', '')
+
+        for ds in self.multi_data_source.data_sources:
+            if not _live_ds_matches_instrument_id(ds, symbol):
+                continue
+            if not order_sys_id:
+                break
+
+            if order_status in ['0', '2', '4', '5']:
+                ds.pending_orders.pop(order_sys_id, None)
+            elif order_status in ['1', '3', 'a']:
+                if order_sys_id not in ds.pending_orders:
+                    data['_local_insert_time'] = time.time()
+
+                    if inherit_retry_state:
+                        consumed = self._consume_pending_inherit(
+                            ds, data, order_sys_id
+                        )
+                        if consumed:
+                            if hasattr(ds, '_next_order_retry_count'):
+                                ds._next_order_retry_count = 0
+                        elif (
+                            hasattr(ds, '_next_order_retry_count')
+                            and ds._next_order_retry_count > 0
+                        ):
+                            ds.orders_to_resend[order_sys_id] = (
+                                ds._next_order_retry_count
+                            )
+                            ds._next_order_retry_count = 0
+                            print(
+                                f"[智能追单] 订单 {order_sys_id} 已继承重试次数: "
+                                f"{ds.orders_to_resend[order_sys_id]} (兜底)"
+                            )
+                else:
+                    data['_local_insert_time'] = ds.pending_orders[
+                        order_sys_id
+                    ].get('_local_insert_time', time.time())
+                ds.pending_orders[order_sys_id] = data
+            break
+
     def _on_order(self, data: Dict):
         """报单回调"""
         # 状态映射
@@ -2962,43 +3084,7 @@ class LiveTradingAdapter:
         print(f"[报单] {time_str} {data['InstrumentID']} {direction}{offset} "
               f"价格={price:.2f} 数量={volume_original} 已成交={volume_traded} 状态={status}")
         
-        # 更新未成交订单跟踪
-        symbol = data['InstrumentID']
-        order_sys_id = data.get('OrderSysID', '')
-        order_status = data['OrderStatus']
-        
-        # 找到对应的数据源并更新pending_orders（主力合约或换月旧合约 _old_contract）
-        for ds in self.multi_data_source.data_sources:
-            if _live_ds_matches_instrument_id(ds, symbol):
-                if order_sys_id:
-                    # 终态订单：从 pending_orders 中移除
-                    # '0'=全部成交, '2'=部分成交不在队列(已撤余量), '4'=未成交不在队列(已撤), '5'=全部撤单
-                    if order_status in ['0', '2', '4', '5']:
-                        if order_sys_id in ds.pending_orders:
-                            del ds.pending_orders[order_sys_id]
-                    # 活跃订单：添加/更新到 pending_orders
-                    elif order_status in ['1', '3', 'a']:
-                        # 只有当订单不在列表中时才添加本地时间戳（避免更新时覆盖）
-                        if order_sys_id not in ds.pending_orders:
-                            data['_local_insert_time'] = time.time()
-                            
-                            # 【智能追单 · B4 修复】优先按 (instrument, direction, offset) 三元组队列匹配，
-                            # 跨订单并发时不会把无关新单误认为重发的"接班人"。
-                            consumed = self._consume_pending_inherit(ds, data, order_sys_id)
-                            if consumed:
-                                # 命中三元组：清掉旧兜底标志位，避免双重继承
-                                if hasattr(ds, '_next_order_retry_count'):
-                                    ds._next_order_retry_count = 0
-                            elif hasattr(ds, '_next_order_retry_count') and ds._next_order_retry_count > 0:
-                                # 兜底：旧路径（保留兼容性，仅在三元组队列未命中时启用）
-                                ds.orders_to_resend[order_sys_id] = ds._next_order_retry_count
-                                ds._next_order_retry_count = 0
-                                print(f"[智能追单] 订单 {order_sys_id} 已继承重试次数: {ds.orders_to_resend[order_sys_id]} (兜底)")
-                        else:
-                            # 保留原有的时间戳
-                            data['_local_insert_time'] = ds.pending_orders[order_sys_id].get('_local_insert_time', time.time())
-                        ds.pending_orders[order_sys_id] = data
-                break
+        self._sync_pending_order(data, inherit_retry_state=True)
         
         # 调用用户自定义的报单回调
         if self.on_order_callback:

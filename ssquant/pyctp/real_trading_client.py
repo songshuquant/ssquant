@@ -642,6 +642,7 @@ class RealTradingTraderSpi(TraderSpi):
             status_msg = self._clean_exchange_text(self._decode_error_msg(pOrder.StatusMsg)) if pOrder.StatusMsg else ""
             data = {
                 'InstrumentID': pOrder.InstrumentID,
+                'ExchangeID': pOrder.ExchangeID,
                 'OrderRef': pOrder.OrderRef,
                 'OrderSysID': pOrder.OrderSysID,
                 'Direction': pOrder.Direction,
