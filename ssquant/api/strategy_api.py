@@ -700,6 +700,28 @@ class StrategyAPI:
         if ds and hasattr(ds, 'cancel_all_orders'):
             ds.cancel_all_orders(log_callback=self._log)
 
+    def cancel_order(self, order_sys_id: str, index: int = 0) -> bool:
+        """
+        撤销指定的未成交订单（仅实盘/SIMNOW模式有效）。
+
+        Args:
+            order_sys_id: CTP交易所报单编号（OrderSysID）
+            index: 数据源索引，默认为0（第一个数据源）
+
+        Returns:
+            bool: 撤单请求是否已成功提交
+
+        注意：
+            - OrderSysID 可从 on_order 或 on_query_order 回调中获取
+            - 订单必须属于指定数据源，且仍处于未成交或部分成交状态
+            - 回测模式下调用此方法返回 False
+        """
+        ds = self.get_data_source(index)
+        if ds and hasattr(ds, 'cancel_order'):
+            return bool(ds.cancel_order(order_sys_id, log_callback=self._log))
+        self._log("[撤单] 当前运行模式不支持单笔撤单")
+        return False
+
     def get_tick(self, index: int = 0):
         """
         获取当前tick的所有字段（Series）
@@ -927,6 +949,22 @@ class StrategyAPI:
         if self._ctp_client and hasattr(self._ctp_client, 'query_trades'):
             self._ctp_client.query_trades(symbol)
 
+    def query_orders(self, symbol: str = ""):
+        """
+        主动查询当日委托记录（仅实盘/SIMNOW模式有效）
+
+        Args:
+            symbol: 合约代码，空字符串表示查询所有委托
+
+        注意：
+            - 此方法仅在实盘模式（SIMNOW/REAL_TRADING）下有效
+            - 回测模式下调用此方法无效果
+            - 查询结果通过 on_query_order 回调逐条返回
+            - 全部返回后触发 on_query_order_complete 回调
+        """
+        if self._ctp_client and hasattr(self._ctp_client, 'query_orders'):
+            self._ctp_client.query_orders(symbol)
+
 # 创建策略API工厂函数
 def create_strategy_api(context: Dict) -> StrategyAPI:
     """
@@ -938,4 +976,4 @@ def create_strategy_api(context: Dict) -> StrategyAPI:
     Returns:
         策略API对象
     """
-    return StrategyAPI(context) 
+    return StrategyAPI(context)

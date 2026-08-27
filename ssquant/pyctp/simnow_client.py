@@ -637,6 +637,7 @@ class SIMNOWTraderSpi(TraderSpi):
             
             data = {
                 'InstrumentID': pOrder.InstrumentID,
+                'ExchangeID': pOrder.ExchangeID,
                 'OrderRef': pOrder.OrderRef,
                 'OrderSysID': pOrder.OrderSysID,
                 'Direction': pOrder.Direction,

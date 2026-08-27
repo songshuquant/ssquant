@@ -473,6 +473,7 @@ if __name__ == "__main__":
 | `buytocover(...)` | 买入平空（buycover的别名） |
 | `close_all(reason="", order_type='bar_close', index=0)` | 全部平仓（多空都平） |
 | `reverse_pos(reason="", order_type='bar_close', index=0)` | 反手交易 |
+| `cancel_order(order_sys_id, index=0)` | 撤销指定委托（仅实盘/SIMNOW有效） |
 | `cancel_all_orders(index=0)` | 撤销所有订单（仅实盘有效） |
 
 ### 3.6 参数与数据源
@@ -520,6 +521,7 @@ def strategy(api):
 | `get_commission()` | float | 手续费 |
 | `query_account()` | None | **主动**向 CTP 查询账户（仅 SIMNOW/实盘；查询后等待 0.3～0.5 秒再读） |
 | `query_position(symbol="")` | None | **主动**向 CTP 查询持仓（仅 SIMNOW/实盘） |
+| `query_orders(symbol="")` | None | **主动**向 CTP 查询当日委托（通过 `on_query_order` 回调返回） |
 | `query_trades(symbol="")` | None | **主动**向 CTP 查询成交（仅 SIMNOW/实盘） |
 
 **v0.4.4 约定**：`get_account` / `get_balance` / `get_available` / `get_position_profit` / `get_close_profit` / `get_margin` / `get_commission` 在**回测、SIMNOW、实盘**均可使用（回测为引擎模拟的账户快照，非 0 占位）。`query_*` 需连接 CTP，回测中不适用。
@@ -869,6 +871,14 @@ def on_position_complete():
     '''持仓查询完成回调'''
     print("[持仓查询完成]")
 
+def on_query_order(data):
+    '''委托查询回调 - 每条当日委托触发一次'''
+    print(f"[委托查询] {data['InstrumentID']} {data['OrderSysID']} 状态:{data['OrderStatus']}")
+
+def on_query_order_complete():
+    '''委托查询完成回调'''
+    print("[委托查询完成]")
+
 def on_disconnect():
     '''断开连接回调 - 与CTP服务器断开时触发'''
     print("[警告] 与CTP服务器断开连接")
@@ -887,6 +897,8 @@ results = runner.run(
     on_position=on_position,
     on_position_complete=on_position_complete,
     on_disconnect=on_disconnect,
+    on_query_order=on_query_order,
+    on_query_order_complete=on_query_order_complete,
 )
 ```
 

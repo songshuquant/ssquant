@@ -184,7 +184,9 @@ class UnifiedStrategyRunner:
             on_position_complete: Optional[Callable] = None,
             on_disconnect: Optional[Callable] = None,
             on_query_trade: Optional[Callable] = None,
-            on_query_trade_complete: Optional[Callable] = None) -> Dict[str, Any]:
+            on_query_trade_complete: Optional[Callable] = None,
+            on_query_order: Optional[Callable] = None,
+            on_query_order_complete: Optional[Callable] = None) -> Dict[str, Any]:
         """
         运行策略
         
@@ -205,6 +207,8 @@ class UnifiedStrategyRunner:
             on_disconnect: 断开连接回调 - 与CTP服务器断开时触发
             on_query_trade: 成交查询回调 - 查询成交记录时触发（单条）
             on_query_trade_complete: 成交查询完成回调 - 查询成交完成时触发
+            on_query_order: 委托查询回调 - 查询委托记录时触发（单条）
+            on_query_order_complete: 委托查询完成回调 - 查询委托完成时触发
             
         Returns:
             运行结果字典
@@ -223,6 +227,8 @@ class UnifiedStrategyRunner:
         self.on_disconnect_callback = on_disconnect
         self.on_query_trade_callback = on_query_trade
         self.on_query_trade_complete_callback = on_query_trade_complete
+        self.on_query_order_callback = on_query_order
+        self.on_query_order_complete_callback = on_query_order_complete
         
         print(f"\n{'='*80}")
         print(f"运行模式: {self.mode.value}")
@@ -509,7 +515,9 @@ class UnifiedStrategyRunner:
             on_position_complete_callback=self.on_position_complete_callback,
             on_disconnect_callback=self.on_disconnect_callback,
             on_query_trade_callback=self.on_query_trade_callback,
-            on_query_trade_complete_callback=self.on_query_trade_complete_callback
+            on_query_trade_complete_callback=self.on_query_trade_complete_callback,
+            on_query_order_callback=self.on_query_order_callback,
+            on_query_order_complete_callback=self.on_query_order_complete_callback
         )
         
         # 运行
@@ -542,7 +550,9 @@ class UnifiedStrategyRunner:
             on_position_complete_callback=self.on_position_complete_callback,
             on_disconnect_callback=self.on_disconnect_callback,
             on_query_trade_callback=self.on_query_trade_callback,
-            on_query_trade_complete_callback=self.on_query_trade_complete_callback
+            on_query_trade_complete_callback=self.on_query_trade_complete_callback,
+            on_query_order_callback=self.on_query_order_callback,
+            on_query_order_complete_callback=self.on_query_order_complete_callback
         )
         
         # 运行
