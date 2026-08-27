@@ -39,6 +39,16 @@ def _live_ds_matches_instrument_id(ds: Any, instrument_id: str) -> bool:
     return bool(old and str(old).upper() == ins)
 
 
+def _resolve_ws_subscription_symbol(ds: Any) -> str:
+    """确定 data_server WebSocket 使用的历史数据合约。"""
+    history_symbol = getattr(ds, 'config', {}).get('history_symbol')
+    if history_symbol is not None and str(history_symbol).strip():
+        return str(history_symbol).strip().lower()
+
+    from ..data.contract_mapper import ContractMapper
+    return ContractMapper.get_continuous_symbol(ds.symbol).lower()
+
+
 class DataRecorder:
     """数据记录器 - 实盘行情落盘（支持CSV和DB双存储，异步队列写入）"""
     
@@ -1160,7 +1170,14 @@ class LiveDataSource:
                     else:
                         prepend_or_filled += 1
             # 重排：保证整体时间正序（O(n log n)，仅在 on_ws_history 被调用时触发，频率极低）
-            self.klines = sorted(cache_by_dt.values(), key=lambda x: x.get('datetime'))
+            cache_maxlen = getattr(self.klines, 'maxlen', None)
+            if cache_maxlen is None:
+                cache_maxlen = self.config.get('lookback_bars', 0) or 1000
+                cache_maxlen = max(cache_maxlen, 100)
+            merged_klines = sorted(
+                cache_by_dt.values(), key=lambda x: x.get('datetime')
+            )
+            self.klines = deque(merged_klines, maxlen=cache_maxlen)
             if appended > 0:
                 print(f"[LiveDataSource] 重连历史补充: +{appended} 条新K线 ({self.symbol})")
             if prepend_or_filled > 0:
@@ -2215,7 +2232,6 @@ class LiveTradingAdapter:
     def _init_ws_kline_client(self):
         """初始化 data_server WebSocket K线客户端"""
         from ..data.ws_kline_client import WSKlineClient, WEBSOCKET_AVAILABLE
-        from ..data.contract_mapper import ContractMapper
         
         if not WEBSOCKET_AVAILABLE:
             print("[实盘适配器] ❌ websocket-client 未安装，无法使用 data_server K线模式")
@@ -2273,8 +2289,8 @@ class LiveTradingAdapter:
             if ds.kline_source != 'data_server':
                 continue
             
-            # 推导 WebSocket 订阅合约: 具体合约 → 主连(888)
-            ws_symbol = ContractMapper.get_continuous_symbol(ds.symbol).lower()
+            # history_symbol 是用户显式指定的历史数据源，应优先于交易合约。
+            ws_symbol = _resolve_ws_subscription_symbol(ds)
             period = _normalize_period(ds.kline_period)
             
             # 建立映射: (ws_symbol, period) -> LiveDataSource
@@ -2301,6 +2317,40 @@ class LiveTradingAdapter:
             self._ws_preload_done.set()
         
         print(f"[实盘适配器] data_server K线订阅完成，等待预加载 {self._ws_preload_expected} 个数据源...\n")
+
+    def refresh_kline_history(
+        self, index: int = 0, preload: Optional[int] = None
+    ) -> bool:
+        """主动刷新指定数据源的历史 K 线缓存。"""
+        if self._kline_source != 'data_server':
+            print("[实盘适配器] 当前不是 data_server K线模式，无法主动刷新")
+            return False
+
+        client = getattr(self, 'ws_kline_client', None)
+        if client is None:
+            print("[实盘适配器] WebSocket K线客户端尚未初始化")
+            return False
+
+        data_sources = self.multi_data_source.data_sources
+        if not isinstance(index, int) or index < 0 or index >= len(data_sources):
+            print(
+                f"[实盘适配器] 数据源索引 {index} 超出范围，"
+                f"数据源数量: {len(data_sources)}"
+            )
+            return False
+
+        ds = data_sources[index]
+        if ds.kline_source != 'data_server':
+            print(f"[实盘适配器] 数据源 {index} 不是 data_server K线模式")
+            return False
+
+        ws_symbol = _resolve_ws_subscription_symbol(ds)
+        period = _normalize_period(ds.kline_period)
+        return client.refresh_history(
+            symbol=ws_symbol,
+            period=period,
+            preload=preload,
+        )
     
     def _reauth_for_ws(self):
         """WebSocket 被服务端以 4001 拒绝后，重新进行 HTTP 鉴权"""
@@ -2379,6 +2429,7 @@ class LiveTradingAdapter:
             'account_info': self.account_info,  # 账户信息引用
             'ctp_client': self.ctp_client,      # CTP客户端引用
             'runtime_state_getter': self.get_runtime_stats,
+            'kline_history_refresher': self.refresh_kline_history,
             'rollover_status_getter': lambda: (
                 self._rollover_engine.get_status_snapshot()
                 if getattr(self, '_rollover_engine', None)

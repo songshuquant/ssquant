@@ -196,6 +196,55 @@ class WSKlineClient:
                 self._send_subscribe(sub)
             else:
                 self._pending_subscriptions.append(sub)
+
+    def refresh_history(
+        self, symbol: str, period: str, preload: Optional[int] = None
+    ) -> bool:
+        """重新请求已有订阅的历史 K 线，不重复登记订阅。
+
+        Args:
+            symbol: 已订阅的合约代码。
+            period: 已订阅的 K 线周期。
+            preload: 本次请求数量；None 表示沿用原订阅数量。
+
+        Returns:
+            刷新请求是否已成功发送。
+        """
+        sym = symbol.lower()
+        prd = period.upper()
+
+        if preload is not None:
+            if not isinstance(preload, int) or preload < 0:
+                raise ValueError("preload 必须是大于等于 0 的整数或 None")
+
+        with self._sub_lock:
+            active = next(
+                (
+                    sub
+                    for sub in self._active_subscriptions
+                    if sub['symbol'] == sym and sub['period'] == prd
+                ),
+                None,
+            )
+            request = dict(active) if active is not None else None
+
+        if request is None:
+            print(f"[WSKlineClient] 未找到活动订阅: {sym} {prd}")
+            return False
+        if not self._connected:
+            print(f"[WSKlineClient] 当前未连接，无法主动刷新: {sym} {prd}")
+            return False
+
+        if preload is not None:
+            request['preload'] = preload
+
+        sent = self._send_subscribe(request)
+        if sent:
+            print(
+                f"[WSKlineClient] 已请求刷新历史数据: {sym} {prd} "
+                f"x {request.get('preload', 0)}"
+            )
+        return sent
     
     def close(self):
         """断开连接"""
@@ -502,8 +551,8 @@ class WSKlineClient:
     
     # ========== 内部：发送 ==========
     
-    def _send_subscribe(self, sub: Dict):
-        """发送订阅请求（支持同步和异步两种连接）"""
+    def _send_subscribe(self, sub: Dict) -> bool:
+        """发送订阅请求（支持同步和异步两种连接）。"""
         message = json.dumps({
             'action': 'subscribe_kline',
             'symbol': sub['symbol'],
@@ -514,14 +563,17 @@ class WSKlineClient:
         try:
             if self._ws and hasattr(self._ws, 'send'):
                 self._ws.send(message)
+                return True
             elif self._async_ws and self._event_loop:
                 import asyncio
                 asyncio.run_coroutine_threadsafe(
                     self._async_ws.send(message),
                     self._event_loop
                 )
+                return True
         except Exception as e:
             print(f"[WSKlineClient] 发送订阅失败: {e}")
+        return False
     
     def _process_pending_subscriptions(self):
         """处理待订阅队列"""
