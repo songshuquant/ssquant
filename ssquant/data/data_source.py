@@ -691,7 +691,7 @@ class DataSource:
         if raw_price is None:
             raw_price = price
 
-        self.trades.append({
+        trade_record = {
             'datetime': datetime,
             'action': action,
             'price': price,           # 复权价：用户策略 / 画图 / 限价单触发用
@@ -699,11 +699,15 @@ class DataSource:
             'volume': volume,
             'reason': '',  # 不再记录原因
             'slippage_cost': slippage_cost  # 滑点成本
-        })
+        }
+        self.trades.append(trade_record)
         # 同步增量维护账户聚合状态：把原本每根 K 线全量重放 self.trades 的 O(N×T)
         # 折算为每笔成交一次的 O(1) 更新；get_runtime_account_snapshot 直接读取即可。
         # 用 raw_price 计算 P&L，避免复权因子在换月点污染
         self._apply_trade_to_account_state(action, raw_price, volume)
+        # 保存成交后的净仓位快照，供回测报告直接展示。使用增量账户状态而不是
+        # current_pos，可兼容测试或扩展代码直接调用 add_trade 的场景。
+        trade_record['position_after'] = self._acct_long_pos - self._acct_short_pos
 
     def get_price_by_type(self, order_type='bar_close'):
         """
