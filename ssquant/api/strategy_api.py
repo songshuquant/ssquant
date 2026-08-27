@@ -22,6 +22,9 @@ class StrategyAPI:
         self._ctp_client = context.get('ctp_client', None)      # CTP客户端引用
         self._runtime_state_getter = context.get('runtime_state_getter', None)
         self._rollover_status_getter = context.get('rollover_status_getter', None)
+        self._kline_history_refresher = context.get(
+            'kline_history_refresher', None
+        )
         
     def log(self, message: str):
         """
@@ -168,6 +171,32 @@ class StrategyAPI:
         if ds:
             return ds.get_klines(window=window)
         return pd.DataFrame()
+
+    def refresh_klines(
+        self, index: int = 0, preload: Optional[int] = None
+    ) -> bool:
+        """主动重新请求历史 K 线并合并到实时缓存。
+
+        该接口仅在 SIMNOW/实盘的 ``data_server`` K 线模式下有效。
+        请求异步执行；返回 ``True`` 表示刷新请求已发送，历史数据到达后
+        框架会按时间戳去重合并，不会重复注册 WebSocket 订阅。
+
+        Args:
+            index: 数据源索引，默认为 0。
+            preload: 本次请求的历史 K 线数量。``None`` 表示沿用原订阅数量。
+
+        Returns:
+            bool: 刷新请求是否已成功发送。
+
+        Example:
+            ``api.refresh_klines(index=0, preload=500)``
+        """
+        if not callable(self._kline_history_refresher):
+            self._log("[K线刷新] 当前运行模式不支持主动刷新历史K线")
+            return False
+        return bool(
+            self._kline_history_refresher(index=index, preload=preload)
+        )
     
     def get_datetime(self, index: int = 0):
         """

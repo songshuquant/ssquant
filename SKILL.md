@@ -98,6 +98,7 @@ high = api.get_high()
 low = api.get_low()
 volume = api.get_volume()
 klines = api.get_klines()
+refresh_sent = api.refresh_klines(index=0, preload=500)  # 仅 SIMNOW/实盘 data_server
 idx = api.get_idx()
 dt = api.get_datetime()
 ```

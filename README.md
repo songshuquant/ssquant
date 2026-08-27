@@ -296,7 +296,12 @@ api.get_close()
 api.get_volume()
 api.get_pos()
 api.get_balance()
+api.refresh_klines(index=0, preload=500)  # 主动刷新实盘历史K线
 ```
+
+`refresh_klines()` 仅用于 SIMNOW/实盘的 `data_server` K 线模式。
+接口异步重新请求已有订阅的历史数据，并按时间戳合并到实时缓存；返回
+`True` 表示请求已发送，不会重复登记 WebSocket 订阅。
 
 ### 高性能指标接口
 
