@@ -21,6 +21,7 @@ else:
         'pandas>=1.3.0',
         'numpy>=1.20.0',
         'requests>=2.25.0',
+        'ssquantdata>=0.1.3,<0.2',
     ]
 
 setup(
@@ -54,6 +55,7 @@ setup(
     python_requires='>=3.9,<3.15',
 
     extras_require={
+        'test': ['pytest>=8,<9', 'websockets>=14,<17'],
         'ml': [
             'scikit-learn>=0.24.0',
             'joblib>=1.0.0',

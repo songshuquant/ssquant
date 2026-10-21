@@ -4,7 +4,7 @@ import json
 import unittest
 from collections import deque
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from ssquant.api.strategy_api import StrategyAPI
 from ssquant.backtest.live_trading_adapter import (
@@ -15,37 +15,21 @@ from ssquant.backtest.live_trading_adapter import (
 from ssquant.data.ws_kline_client import WSKlineClient
 
 
-class _FakeWebSocket:
-    def __init__(self):
-        self.messages = []
-
-    def send(self, message):
-        self.messages.append(json.loads(message))
-
-
 class WSKlineHistoryRefreshTests(unittest.TestCase):
     def setUp(self):
-        self.client = WSKlineClient()
-        self.client._connected = True
-        self.client._ws = _FakeWebSocket()
+        self.sdk = Mock()
+        self.sdk.futures.history.return_value = SimpleNamespace(records=[], status='ok')
+        self.client = WSKlineClient(client=self.sdk)
         self.client.subscribe_kline('rb777', '1M', preload=100)
-        self.client._ws.messages.clear()
+        self.client._connected = True
 
     def test_refresh_reuses_active_subscription_without_duplicating_it(self):
         result = self.client.refresh_history('RB777', '1m', preload=500)
 
         self.assertTrue(result)
         self.assertEqual(len(self.client._active_subscriptions), 1)
-        self.assertEqual(
-            self.client._ws.messages,
-            [
-                {
-                    'action': 'subscribe_kline',
-                    'symbol': 'rb777',
-                    'period': '1M',
-                    'preload': 500,
-                }
-            ],
+        self.sdk.futures.history.assert_called_once_with(
+            'rb777', '1M', limit=500, preload=True, cache=False,
         )
 
     def test_refresh_fails_cleanly_while_disconnected(self):
@@ -54,7 +38,7 @@ class WSKlineHistoryRefreshTests(unittest.TestCase):
         result = self.client.refresh_history('rb777', '1M')
 
         self.assertFalse(result)
-        self.assertEqual(self.client._ws.messages, [])
+        self.sdk.futures.history.assert_not_called()
 
 
 class LiveDataRefreshRoutingTests(unittest.TestCase):

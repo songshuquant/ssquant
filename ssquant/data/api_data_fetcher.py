@@ -1,7 +1,5 @@
-import requests
 import pandas as pd
 from datetime import datetime, timedelta
-from io import StringIO
 import os
 import time
 import sqlite3
@@ -1123,143 +1121,43 @@ def get_futures_data(
         return pd.DataFrame()  # 返回空DataFrame而不是None
 
 def _try_data_server_api(symbol, start_date=None, end_date=None, kline_period='1M',
-                         adjust_type='0', depth='no',
-                         start_time=None, end_time=None, limit=None):
-    """
-    尝试从 data_server REST API 获取数据（鉴权通过后优先使用）
+                         adjust_type='0', depth='no', start_time=None, end_time=None,
+                         limit=None, username=None, password=None):
+    """Fetch raw remote bars exclusively through ssquantdata, then adjust locally."""
+    from .sdk_client import history_frame
 
-    data_server 负责从 1M 聚合为目标周期，客户端直接请求目标周期即可。
-    如果上层需要复权，在返回后由 apply_local_adjust() 进行本地复权。
-
-    支持三种请求模式:
-    1. 精确时间范围: start_time/end_time
-    2. 日期范围: start_date/end_date
-    3. 按数量获取: limit
-
-    Returns:
-        DataFrame（成功）或 None（data_server 无数据或不可用）
-    """
-    try:
-        from .auth_manager import get_ordered_data_server_api_bases
-        api_bases = get_ordered_data_server_api_bases()
-        if not api_bases:
-            return None
-
-        normalized_period = kline_period.strip().upper()
-
-        # 直接请求目标周期（data_server 服务端完成 1M→目标周期 的聚合）
-        params = {
-            'symbol': symbol.lower(),
-            'period': normalized_period,
-            'adjust_type': '0',
-        }
-
-        # 根据请求模式填充参数
-        if start_time or end_time:
-            if start_time:
-                params['start_time'] = start_time
-            if end_time:
-                params['end_time'] = end_time
-            desc = f"({start_time or '...'}~{end_time or '...'})"
-        elif start_date or end_date:
-            if start_date:
-                params['start_date'] = start_date
-            if end_date:
-                params['end_date'] = end_date
-            desc = f"({start_date or '...'}~{end_date or '...'})"
-        else:
-            desc = ""
-
-        if limit:
-            params['limit'] = limit
-            desc = f"(limit={limit})" if not desc else f"{desc} limit={limit}"
-        elif 'start_time' not in params and 'start_date' not in params:
-            params['limit'] = 5000
-            desc = "(limit=5000 default)"
-
-        for api_base in api_bases:
-            url = f"{api_base}/api/futures/history"
-            try:
-                resp = requests.get(url, params=params, timeout=(20, 180))
-            except requests.exceptions.ConnectionError:
-                continue
-            except Exception:
-                continue
-
-            if resp.status_code != 200:
-                continue
-
-            try:
-                result = resp.json()
-            except Exception:
-                continue
-
-            if result.get('code') != 0:
-                continue
-
-            data_obj = result.get('data', {})
-            records = data_obj.get('klines', []) if isinstance(data_obj, dict) else data_obj
-
-            if not records:
-                continue
-
-            df = pd.DataFrame(records)
-
-            if df.empty or 'datetime' not in df.columns:
-                continue
-
-            df['datetime'] = pd.to_datetime(df['datetime'])
-            df = df.set_index('datetime')
-            df = df[~df.index.duplicated(keep='last')]
-
-            print(f"[data_server API] 获取 {normalized_period} 数据: {symbol} {desc} {len(df)} 条 (via {api_base})")
-
-            # 本地复权（当前为占位直通，后续实现算法后自动生效）
-            if adjust_type != '0':
-                from .local_adjust import apply_local_adjust
-                df = apply_local_adjust(df, symbol, kline_period, adjust_type)
-
-            return df
-
-        return None
-
-    except Exception:
-        return None
+    if start_time or end_time:
+        start_date = end_date = None
+    else:
+        start_date = pd.Timestamp(start_date).strftime('%Y-%m-%d') if start_date is not None else None
+        end_date = pd.Timestamp(end_date).strftime('%Y-%m-%d') if end_date is not None else None
+    if limit is None and start_time is None and start_date is None:
+        limit = 5000
+    frame = history_frame(
+        symbol, kline_period, username=username, password=password,
+        start_date=start_date, end_date=end_date, start_time=start_time,
+        end_time=end_time, limit=limit,
+    )
+    if not frame.empty and str(adjust_type) != '0':
+        from .local_adjust import apply_local_adjust
+        frame = apply_local_adjust(frame, symbol, kline_period, adjust_type)
+    return frame
 
 
 def fetch_data_from_api(symbol, start_date, end_date, username, password,
                         kline_period, adjust_type, depth, max_retries=3,
                         start_time=None, end_time=None, limit=None):
+    """SDK login, refresh, limits and transport errors are handled by ssquantdata.
+
+    The legacy signature is retained for strategy callers. Errors propagate with
+    their SDK type instead of being converted to a misleading empty success.
     """
-    从API获取数据的辅助函数
+    return _try_data_server_api(
+        symbol, start_date, end_date, kline_period, adjust_type, depth,
+        start_time=start_time, end_time=end_time, limit=limit,
+        username=username, password=password,
+    )
 
-    数据源: 仅使用 data_server API（kanpan789 仅用于鉴权，不用于数据获取）
-
-    支持三种请求模式:
-    1. 精确时间范围: start_time/end_time
-    2. 日期范围: start_date/end_date
-    3. 按数量获取: limit
-    """
-    # ========== 鉴权检查 ==========
-    from .auth_manager import verify_auth
-    if not verify_auth(username, password):
-        from .auth_manager import get_auth_message
-        print(f"[数据请求] 鉴权失败: {get_auth_message()}，无法获取数据")
-        return pd.DataFrame()
-
-    # ========== 从 data_server API 获取 ==========
-    ds_df = _try_data_server_api(symbol, start_date, end_date, kline_period, adjust_type, depth,
-                                  start_time=start_time, end_time=end_time, limit=limit)
-    if ds_df is not None:
-        return ds_df
-
-    # data_server 不可用或无数据
-    req_desc = f"({start_time or start_date or ''}~{end_time or end_date or ''})"
-    if limit:
-        req_desc += f" limit={limit}"
-    print(f"[数据请求] data_server 无法获取 {symbol} {kline_period} {req_desc}")
-    print(f"[数据请求] 请确认 data_server 是否已启动，以及数据库中是否有对应数据")
-    return pd.DataFrame()
 
 def get_cache_db_and_table(symbol, kline_period, cache_dir, adjust_type):
     """获取缓存数据库路径和表名"""
