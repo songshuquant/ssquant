@@ -95,15 +95,17 @@ def _get_auth_url() -> str:
     return urls[0]
 
 
-def verify_auth(username: str = None, password: str = None) -> bool:
+def verify_auth(username: str = None, password: str = None,
+                *, endpoint_index: Optional[int] = None) -> bool:
     """
-    验证用户身份（仅首次调用时真正请求 data_server，后续使用缓存）
+    验证用户身份（普通调用使用缓存；指定 WS 节点时重新请求该节点）
     
     鉴权流程: ssquant → data_server → kanpan789.com
     
     Args:
         username: API账号，为 None 时自动从 trading_config 读取
         password: API密码
+        endpoint_index: WS 重连目标节点；指定时重新验证该节点，不用缓存或回退到其他节点
     
     Returns:
         True=鉴权成功, False=鉴权失败
@@ -111,8 +113,12 @@ def verify_auth(username: str = None, password: str = None) -> bool:
     global _auth_result, _auth_message, _last_auth_success_index
     
     with _auth_lock:
-        if _auth_result is not None:
+        if endpoint_index is None and _auth_result is not None:
             return _auth_result
+
+        if endpoint_index is not None:
+            _auth_result = None
+            _auth_message = ""
         
         if username is None or password is None:
             try:
@@ -130,7 +136,14 @@ def verify_auth(username: str = None, password: str = None) -> bool:
             return False
         
         verify_urls = _build_verify_urls()
-        order = _ordered_verify_indices(len(verify_urls))
+        if endpoint_index is not None:
+            if not 0 <= endpoint_index < len(verify_urls):
+                _auth_result = False
+                _auth_message = "WS 节点没有对应的 HTTP 鉴权地址"
+                return False
+            order = [endpoint_index]
+        else:
+            order = _ordered_verify_indices(len(verify_urls))
         print(f"\n[鉴权] 正在验证账号 {username} ...")
         credential_rejected = False  # 服务端已明确拒绝账号（不再尝试其它节点）
         
@@ -166,7 +179,7 @@ def verify_auth(username: str = None, password: str = None) -> bool:
         
         if _auth_result is None:
             _auth_result = False
-            if not credential_rejected and len(verify_urls) > 1:
+            if not credential_rejected and len(order) > 1:
                 _auth_message = "所有 data_server 鉴权地址均不可用，请检查网络或服务"
             elif not credential_rejected and not _auth_message:
                 _auth_message = "无法连接 data_server，请确认服务已启动"

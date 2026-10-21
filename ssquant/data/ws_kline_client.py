@@ -95,7 +95,7 @@ class WSKlineClient:
         self.on_connected: Optional[Callable] = None       # on_connected()
         self.on_disconnected: Optional[Callable] = None    # on_disconnected()
         self.on_error: Optional[Callable] = None           # on_error(error_msg)
-        self.on_auth_required: Optional[Callable] = None   # 服务端要求重新鉴权时触发
+        self.on_auth_required: Optional[Callable] = None   # 无参回调；目标节点验证成功返回 True
         
         # ========== 连接状态 ==========
         self._ws = None              # websocket-client 同步连接引用
@@ -132,6 +132,11 @@ class WSKlineClient:
     @property
     def _current_ws_url(self) -> str:
         return self.ws_urls[self._url_index % len(self.ws_urls)]
+
+    @property
+    def endpoint_index(self) -> int:
+        """当前准备连接的节点，用于匹配其 HTTP 鉴权地址。"""
+        return self._url_index
     
     def _notify_endpoint_connected(self):
         try:
@@ -256,6 +261,10 @@ class WSKlineClient:
                 self._ws.close()
             except:
                 pass
+
+        if self._async_ws and self._event_loop:
+            import asyncio
+            asyncio.run_coroutine_threadsafe(self._async_ws.close(), self._event_loop)
         
         if self._thread:
             self._thread.join(timeout=3.0)
@@ -268,22 +277,32 @@ class WSKlineClient:
     def _run_loop(self):
         """后台运行循环（处理连接和重连）"""
         while self._running:
-            if self._need_reauth and self.on_auth_required:
+            auth_failed = False
+            if self._need_reauth:
+                if not self.on_auth_required:
+                    print("[WSKlineClient] 鉴权已失效，未配置重新鉴权回调，停止重连")
+                    break
                 print("[WSKlineClient] 服务端要求重新鉴权，正在重新验证...")
                 try:
-                    self.on_auth_required()
-                    print("[WSKlineClient] 重新鉴权完成")
+                    auth_failed = self.on_auth_required() is not True
+                    if not auth_failed:
+                        self._need_reauth = False
+                        print("[WSKlineClient] 重新鉴权完成")
+                    else:
+                        print("[WSKlineClient] 重新鉴权未通过，暂不建立 WS 连接")
                 except Exception as e:
+                    auth_failed = True
                     print(f"[WSKlineClient] 重新鉴权失败: {e}")
-                self._need_reauth = False
             
-            try:
-                self._do_connect()
-            except Exception as e:
-                if self._running:
-                    print(f"[WSKlineClient] 连接异常: {e}")
+            if not self._need_reauth and self._running:
+                try:
+                    self._do_connect()
+                except Exception as e:
+                    if self._running:
+                        print(f"[WSKlineClient] 连接异常: {e}")
             
             self._connected = False
+            self._connect_event.clear()
             
             if not self._running:
                 break
@@ -295,8 +314,10 @@ class WSKlineClient:
                 print(f"[WSKlineClient] 达到最大重连次数 ({self.max_reconnect_attempts})，停止重连")
                 break
             
-            if len(self.ws_urls) > 1:
+            # 4001 先在原节点重新鉴权；网络故障或鉴权请求失败才尝试下一节点。
+            if len(self.ws_urls) > 1 and (not self._need_reauth or auth_failed):
                 self._url_index = (self._url_index + 1) % len(self.ws_urls)
+                self._need_reauth = self.on_auth_required is not None
                 print(f"[WSKlineClient] 切换 data_server 地址 → {self._current_ws_url}")
             
             self._reconnect_count += 1
@@ -307,6 +328,7 @@ class WSKlineClient:
                 if not self._running:
                     return
                 time.sleep(0.1)
+        self._running = False
     
     def _do_connect(self):
         """执行一次WebSocket连接"""
@@ -347,25 +369,7 @@ class WSKlineClient:
                     max_size=10 * 1024 * 1024,
                 ) as ws:
                     self._async_ws = ws
-                    self._connected = True
-                    self.ws_url = self._current_ws_url
-                    self._notify_endpoint_connected()
-                    self._reconnect_count = 0
-                    self._connect_event.set()
-                    
-                    is_reconnect = self._ever_connected
-                    self._ever_connected = True
-                    
-                    if is_reconnect:
-                        with self._sub_lock:
-                            self._pending_subscriptions.clear()
-                        await self._async_resend_all()
-                    else:
-                        await self._async_send_pending()
-                    
-                    if self.on_connected:
-                        self.on_connected()
-                    
+                    self._on_open(ws)
                     async for message in ws:
                         if not self._running:
                             break
@@ -381,6 +385,7 @@ class WSKlineClient:
                     print(f"[WSKlineClient] async连接异常: {e}")
             finally:
                 self._async_ws = None
+                self._on_close(None)
         
         try:
             loop.run_until_complete(_run())
@@ -388,36 +393,22 @@ class WSKlineClient:
             self._event_loop = None
             loop.close()
     
-    async def _async_send_pending(self):
-        """异步发送待订阅队列"""
-        with self._sub_lock:
-            for sub in self._pending_subscriptions:
-                msg = json.dumps({
-                    'action': 'subscribe_kline',
-                    'symbol': sub['symbol'],
-                    'period': sub['period'],
-                    'preload': sub.get('preload', 0),
-                })
-                await self._async_ws.send(msg)
-            self._pending_subscriptions.clear()
-    
-    async def _async_resend_all(self):
-        """异步重发所有活跃订阅（重连恢复）"""
-        with self._sub_lock:
-            for sub in self._active_subscriptions:
-                msg = json.dumps({
-                    'action': 'subscribe_kline',
-                    'symbol': sub['symbol'],
-                    'period': sub['period'],
-                    'preload': sub.get('preload', 0),
-                })
-                await self._async_ws.send(msg)
-    
     # ========== 内部：WebSocket 事件处理 ==========
     
     def _on_open(self, ws):
-        """WebSocket连接成功"""
-        self._connected = True
+        """传输层已连接，仍须等待服务端 welcome，不能据此宣告鉴权成功。"""
+        self._connected = False
+        self._connect_event.clear()
+
+    def _on_welcome(self):
+        """服务端接受连接后再发送订阅，订阅结果以 subscribed 回执为准。"""
+        with self._sub_lock:
+            if self._connected:
+                return
+            self._connected = True
+            self._pending_subscriptions.clear()
+            for sub in self._active_subscriptions:
+                self._send_subscribe(sub)
         self.ws_url = self._current_ws_url
         self._notify_endpoint_connected()
         is_reconnect = self._ever_connected
@@ -426,13 +417,7 @@ class WSKlineClient:
         self._connect_event.set()
         
         if is_reconnect:
-            print(f"[WSKlineClient] 重连成功，恢复 {len(self._active_subscriptions)} 个订阅")
-            with self._sub_lock:
-                self._pending_subscriptions.clear()
-                for sub in self._active_subscriptions:
-                    self._send_subscribe(sub)
-        else:
-            self._process_pending_subscriptions()
+            print(f"[WSKlineClient] 服务端已接受重连，已请求恢复 {len(self._active_subscriptions)} 个订阅，等待确认")
         
         if self.on_connected:
             try:
@@ -446,6 +431,14 @@ class WSKlineClient:
     
     def _on_ws_error(self, ws, error):
         """WebSocket错误"""
+        # websocket-client 1.9.0 会把关闭帧交给 on_error，而 on_close 的 code 为 None。
+        code = getattr(error, 'status_code', None)
+        if getattr(error, 'opcode', None) == 8:
+            payload = getattr(error, 'data', b'')
+            if isinstance(payload, bytes) and len(payload) >= 2:
+                code = int.from_bytes(payload[:2], 'big')
+        if code == 4001:
+            self._need_reauth = True
         if self._running:
             error_msg = str(error) if error else "未知错误"
             if 'Connection' not in error_msg:
@@ -459,6 +452,7 @@ class WSKlineClient:
     def _on_close(self, ws, close_status_code=None, close_msg=None):
         """WebSocket关闭"""
         self._connected = False
+        self._connect_event.clear()
         if close_status_code == 4001:
             self._need_reauth = True
         if self.on_disconnected:
@@ -476,7 +470,7 @@ class WSKlineClient:
             msg_type = data.get('type', '')
             
             if msg_type == 'welcome':
-                pass
+                self._on_welcome()
             
             elif msg_type == 'kline':
                 self._handle_kline(data)
