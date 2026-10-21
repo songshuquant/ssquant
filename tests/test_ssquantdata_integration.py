@@ -121,6 +121,7 @@ class LocalServices:
     def __exit__(self, *args):
         self.messages.put(None)
         self.http.shutdown()
+        self.http.server_close()
         self.ws.shutdown()
         self.http_thread.join(2)
         self.ws_thread.join(2)
