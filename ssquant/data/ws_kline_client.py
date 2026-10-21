@@ -1,13 +1,13 @@
 """Framework K-line callbacks over ssquantdata's authenticated realtime stream.
 
-The SDK owns transport, Bearer renewal and sequence validation. A gap is terminal:
-the strategy must rebuild its data state before a new stream can be started.
+The SDK rotates Bearers and verifies exact sequence replay. Unrecoverable gaps
+remain terminal; unverified history snapshots never establish continuity.
 """
 import threading
 from typing import Dict, Optional
 
 try:
-    from ssquantdata import KlineChannel, GapEvent, RealtimeGapError, SSQuantDataError
+    from ssquantdata import KlineChannel, GapEvent, RecoveryEvent, RealtimeGapError, SSQuantDataError
     WEBSOCKET_AVAILABLE = True
 except ImportError:
     WEBSOCKET_AVAILABLE = False
@@ -33,11 +33,14 @@ class WSKlineClient:
         self.on_disconnected = None
         self.on_error = None
         self.on_gap = None
+        self.on_recovering = None
+        self.on_recovered = None
         self.stats = {'klines_received': 0, 'history_received': 0}
 
     @property
     def connected(self):
-        return self._connected
+        return (self._connected and not bool(getattr(self._stream, 'recovering', False))
+                and bool(getattr(self._stream, 'connected', True)))
 
     def connect(self, timeout=10.0):
         if not WEBSOCKET_AVAILABLE:
@@ -120,6 +123,11 @@ class WSKlineClient:
                         self.on_gap(event)
                     # The SDK next raises RealtimeGapError after delivering the gap.
                     continue
+                if isinstance(event, RecoveryEvent):
+                    self._connected = not self._stream.recovering
+                    if self.connected and self.on_recovered:
+                        self.on_recovered()
+                    continue
                 self._handle_message(event)
         except Exception as exc:
             self.error = exc
@@ -134,7 +142,11 @@ class WSKlineClient:
 
     def _handle_message(self, message):
         kind = message.get('type')
-        if kind == 'welcome':
+        if kind == 'recovering':
+            self._connected = False
+            if self.on_recovering:
+                self.on_recovering()
+        elif kind == 'welcome':
             if not self._connected:
                 self._replace_channels()
                 self._connected = True
