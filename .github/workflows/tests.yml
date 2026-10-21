@@ -1,0 +1,51 @@
+name: Framework validation
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        python: ['3.9', '3.12']
+    runs-on: ${{ matrix.os }}
+    env:
+      MPLBACKEND: Agg
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Isolate dependencies from runner tools
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import venv
+          venv.create('.venv', with_pip=True)
+          scripts = Path('.venv', 'Scripts' if os.name == 'nt' else 'bin').resolve()
+          with open(os.environ['GITHUB_PATH'], 'a', encoding='utf-8') as stream:
+              print(scripts, file=stream)
+          PY
+      - name: Install framework and published SDK
+        run: python -m pip install ".[test]"
+      - run: python -m pip check
+      - name: Test installed package with normal imports
+        working-directory: ${{ runner.temp }}
+        run: python -m pytest "${{ github.workspace }}/tests" --import-mode=importlib -ra --junitxml="${{ github.workspace }}/test-results.xml"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tests-${{ matrix.os }}-${{ matrix.python }}
+          path: test-results.xml
