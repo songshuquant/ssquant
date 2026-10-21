@@ -2250,6 +2250,8 @@ class LiveTradingAdapter:
         self.ws_kline_client.on_kline = self._on_ws_kline
         self.ws_kline_client.on_history = self._on_ws_history
         self.ws_kline_client.on_error = self._on_ws_failure
+        self.ws_kline_client.on_recovering = self._on_ws_recovering
+        self.ws_kline_client.on_recovered = self._on_ws_recovered
 
         # 为每个数据源订阅K线
         self._ws_preload_expected = 0
@@ -2328,6 +2330,23 @@ class LiveTradingAdapter:
             preload=preload,
         )
     
+    def _remote_klines_ready(self):
+        client = getattr(self, 'ws_kline_client', None)
+        return (not getattr(self, '_remote_data_recovering', False)
+                and (client is None or client.connected))
+
+    def _on_ws_recovering(self):
+        with self._strategy_lock:
+            self._remote_data_recovering = True
+            self._update_runtime_state(remote_data_status='recovering')
+
+    def _on_ws_recovered(self):
+        # Replayed bars have now rebuilt every subscribed cache. Do not trade
+        # historical replay signals; resume callbacks on the next live trigger.
+        with self._strategy_lock:
+            self._remote_data_recovering = False
+            self._update_runtime_state(remote_data_status='connected')
+
     def _on_ws_failure(self, error):
         """A terminated SDK stream cannot drive a strategy with stale K lines."""
         self._remote_data_error = error
@@ -2367,7 +2386,7 @@ class LiveTradingAdapter:
             if self.running and not self.enable_tick_callback:
                 try:
                     with self._strategy_lock:
-                        if not self.running:
+                        if not self.running or not self._remote_klines_ready():
                             return
                         if getattr(self, '_rollover_engine', None):
                             self._rollover_engine.process_before_strategy()
@@ -2623,6 +2642,8 @@ class LiveTradingAdapter:
         try:
             with self._strategy_lock:
                 if not self.running:
+                    return
+                if self._kline_source == 'data_server' and not self._remote_klines_ready():
                     return
                 if getattr(self, '_rollover_engine', None):
                     self._rollover_engine.process_before_strategy()

@@ -121,6 +121,7 @@ class LocalServices:
     def __exit__(self, *args):
         self.messages.put(None)
         self.http.shutdown()
+        self.http.server_close()
         self.ws.shutdown()
         self.http_thread.join(2)
         self.ws_thread.join(2)
@@ -423,3 +424,56 @@ def test_gap_stops_a_tick_callback_that_was_waiting_for_strategy_lock():
         thread.join(2)
     adapter.strategy_func.assert_not_called()
     assert not thread.is_alive()
+
+
+def test_replay_updates_cache_but_only_next_live_bar_runs_strategy():
+    adapter = LiveTradingAdapter.__new__(LiveTradingAdapter)
+    adapter.running = True
+    adapter.enable_tick_callback = False
+    adapter.data_recorders = {}
+    adapter._strategy_lock = threading.RLock()
+    adapter._runtime_state_lock = threading.Lock()
+    adapter._runtime_state = {}
+    adapter._ws_kline_arrived = threading.Event()
+    adapter.api = SimpleNamespace()
+    source = LiveDataSource('rb2701', {'kline_source': 'data_server', 'lookback_bars': 100})
+    adapter._ws_subscription_map = {('rb777', '1M'): source}
+    stream = SimpleNamespace(recovering=False, connected=True)
+    client = WSKlineClient()
+    client._stream, client._connected = stream, True
+    adapter.ws_kline_client = client
+    adapter.strategy_func = Mock()
+    adapter._on_ws_kline('rb777', '1M', copy.deepcopy(bar(0)))
+    assert adapter.strategy_func.call_count == 1
+    # SDK exposes recovery immediately, before its callback thread drains prefix.
+    stream.recovering, stream.connected = True, False
+    adapter._on_ws_kline('rb777', '1M', copy.deepcopy(bar(1)))
+    adapter._on_ws_recovering()
+    adapter._on_ws_kline('rb777', '1M', copy.deepcopy(bar(2)))
+    assert len(source.klines) == 3 and adapter.strategy_func.call_count == 1
+    stream.recovering, stream.connected = False, True
+    adapter._on_ws_recovered()
+    assert adapter.strategy_func.call_count == 1 and adapter.running
+    adapter._on_ws_kline('rb777', '1M', copy.deepcopy(bar(3)))
+    assert adapter.strategy_func.call_count == 2 and len(source.klines) == 4
+
+
+def test_tick_callback_pauses_even_before_recovery_notice_is_consumed():
+    adapter = LiveTradingAdapter.__new__(LiveTradingAdapter)
+    adapter.running = True
+    adapter.enable_tick_callback = True
+    adapter._kline_source = 'data_server'
+    adapter.multi_data_source = SimpleNamespace(data_sources=[
+        SimpleNamespace(symbol='rb2701', update_tick=lambda data: None)])
+    adapter.data_recorders = {}
+    adapter._strategy_lock = threading.RLock()
+    adapter._ws_kline_arrived = threading.Event()
+    adapter._tick_queue = Queue()
+    adapter._tick_callback_interval = 0
+    adapter._last_tick_strategy_ts = 0
+    adapter.strategy_func = Mock()
+    adapter.api = SimpleNamespace()
+    adapter.ws_kline_client = SimpleNamespace(connected=False)
+    adapter._process_tick_data({'InstrumentID': 'rb2701'})
+    adapter.strategy_func.assert_not_called()
+    assert adapter.running  # Temporary verified recovery does not stop the adapter.
