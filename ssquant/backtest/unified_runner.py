@@ -245,13 +245,13 @@ class UnifiedStrategyRunner:
     
     def _run_backtest(self) -> Dict[str, Any]:
         """运行历史回测"""
-        from ..config.trading_config import get_api_auth
-        API_USERNAME, API_PASSWORD = get_api_auth()
+        # The SDK resolves environment credentials/tokens, then trading_config.
+        API_USERNAME = API_PASSWORD = None
 
         data_source_mode = self.config.get('data_source_mode', 'data_server')
         is_local_mode = data_source_mode == 'local'
 
-        # 远程模式下进行鉴权检查；本地模式跳过，避免 verify_auth() 缓存污染
+        # 远程模式通过 SDK 鉴权；本地模式不创建远程会话。
         if not is_local_mode:
             from ..data.auth_manager import verify_auth, get_auth_message, set_effective_data_server
             set_effective_data_server(self.config.get('data_server'))

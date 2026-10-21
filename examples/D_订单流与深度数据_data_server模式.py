@@ -53,10 +53,10 @@ data_server K线包含的完整字段:
 
 使用前提:
 =================================
-1. data_server 已启动: cd data_server && python run_server.py
-2. data_server config.py 中 FEATURES.order_flow_analysis = True（默认已开启）
-3. data_server config.py 中 FEATURES.depth_data = True（默认已开启）
-4. 已安装 websocket-client: pip install websocket-client
+1. 已安装框架依赖，其中远程行情统一通过 ssquantdata>=0.1.3 获取。
+2. 已配置有效的 SDK 环境变量账号，或 trading_config.py 中的俱乐部账号。
+3. 数据源提供对应的订单流和深度字段；未知值不应当作真实零。
+4. SDK 报告实时缺口后策略会停止，需要核验数据并重建状态后重新启动。
 """
 from ssquant.api.strategy_api import StrategyAPI
 from ssquant.backtest.unified_runner import UnifiedStrategyRunner, RunMode

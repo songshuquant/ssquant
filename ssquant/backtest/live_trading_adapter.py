@@ -1899,6 +1899,7 @@ class LiveTradingAdapter:
         self.ws_kline_client = None
         self._ws_subscription_map = {}  # (ws_symbol, period) -> LiveDataSource
         self._strategy_lock = threading.Lock()  # 策略执行锁（防止tick线程和WS线程并发调用）
+        self._remote_data_error = None
         self._kline_source = config.get('kline_source', 'data_server')
         self._ws_preload_done = threading.Event()
         self._ws_preload_expected = 0
@@ -2009,7 +2010,11 @@ class LiveTradingAdapter:
         
         # 初始化 data_server WebSocket K线客户端（如果启用）
         if self._kline_source == 'data_server':
-            self._init_ws_kline_client()
+            try:
+                self._init_ws_kline_client()
+            except Exception:
+                self.stop()
+                raise
         
         # 等待 data_server 预加载完成（在 CTP 连接前）
         if self._kline_source == 'data_server' and self._ws_preload_expected > 0:
@@ -2020,6 +2025,10 @@ class LiveTradingAdapter:
             else:
                 print(f"[实盘适配器] ⚠️ data_server 预加载超时，已收到 {self._ws_preload_received}/{self._ws_preload_expected}，继续启动...\n")
         
+        if self._remote_data_error is not None:
+            self.stop()
+            raise self._remote_data_error
+
         # 运行策略初始化
         if self.initialize_func:
             print("[实盘适配器] 运行策略初始化...")
@@ -2056,8 +2065,8 @@ class LiveTradingAdapter:
         else:
             raise RuntimeError("CTP客户端初始化失败")
         
-        # 启动策略线程
-        self.running = True
+        # 启动策略线程（SDK 启动期间可能已经报告缺口）
+        self.running = self._remote_data_error is None
         
         # 品牌与免责声明（在CTP连接就绪后显示）
         self._print_disclaimer()
@@ -2072,9 +2081,11 @@ class LiveTradingAdapter:
         
         # 返回结果
         result = {
-            'status': 'completed',
+            'status': 'failed' if self._remote_data_error is not None else 'completed',
             'mode': self.mode,
         }
+        if self._remote_data_error is not None:
+            result['error'] = str(self._remote_data_error)
         
         # 添加symbol信息
         if 'data_sources' in self.config:
@@ -2231,55 +2242,15 @@ class LiveTradingAdapter:
     
     def _init_ws_kline_client(self):
         """初始化 data_server WebSocket K线客户端"""
-        from ..data.ws_kline_client import WSKlineClient, WEBSOCKET_AVAILABLE
-        
-        if not WEBSOCKET_AVAILABLE:
-            print("[实盘适配器] ❌ websocket-client 未安装，无法使用 data_server K线模式")
-            print("[实盘适配器]    请运行: pip install websocket-client")
-            print("[实盘适配器]    回退到本地K线聚合模式")
-            self._kline_source = 'local'
-            # 回退: 设置所有数据源为local模式
-            for ds in self.multi_data_source.data_sources:
-                ds.kline_source = 'local'
-            return
-        
-        # 获取 data_server 配置
+        from ..data.ws_kline_client import WSKlineClient
+
         ds_config = self.config.get('data_server', {})
-        ws_url = ds_config.get('ws_url', 'ws://localhost:8087')
-        ws_urls = [ws_url]
-        for fb in (ds_config.get('fallback_servers') or []):
-            w = fb.get('ws_url')
-            if w:
-                ws_urls.append(w)
-        default_preload = ds_config.get('preload_count', 100)
-        auto_reconnect = ds_config.get('auto_reconnect', True)
-        reconnect_interval = ds_config.get('reconnect_interval', 5.0)
-        
-        if len(ws_urls) > 1:
-            print(f"\n[实盘适配器] 连接 data_server（多地址轮询）:")
-            for i, u in enumerate(ws_urls):
-                print(f"  [{i + 1}] {u}")
-        else:
-            print(f"\n[实盘适配器] 连接 data_server: {ws_urls[0]}")
-        
-        # 创建客户端
-        self.ws_kline_client = WSKlineClient(
-            ws_urls=ws_urls,
-            auto_reconnect=auto_reconnect,
-            reconnect_interval=reconnect_interval,
-        )
-        
-        # 设置回调
+        default_preload = ds_config.get('preload_count', 500)
+        self.ws_kline_client = WSKlineClient()
         self.ws_kline_client.on_kline = self._on_ws_kline
         self.ws_kline_client.on_history = self._on_ws_history
-        self.ws_kline_client.on_auth_required = self._reauth_for_ws
-        
-        # 连接
-        connected = self.ws_kline_client.connect(timeout=10.0)
-        
-        if not connected:
-            print("[实盘适配器] ⚠️ data_server 连接超时，将在后台继续重连")
-        
+        self.ws_kline_client.on_error = self._on_ws_failure
+
         # 为每个数据源订阅K线
         self._ws_preload_expected = 0
         self._ws_preload_received = 0
@@ -2316,7 +2287,12 @@ class LiveTradingAdapter:
         if self._ws_preload_expected == 0:
             self._ws_preload_done.set()
         
-        print(f"[实盘适配器] data_server K线订阅完成，等待预加载 {self._ws_preload_expected} 个数据源...\n")
+        # Register all channels first so the SDK sends one subscription set.
+        if not self.ws_kline_client.connect(timeout=10.0):
+            error = self.ws_kline_client.error or RuntimeError('ssquantdata 实时连接超时')
+            self.ws_kline_client.close()
+            raise error
+        print(f"[实盘适配器] ssquantdata K线订阅完成，等待预加载 {self._ws_preload_expected} 个数据源...\n")
 
     def refresh_kline_history(
         self, index: int = 0, preload: Optional[int] = None
@@ -2352,16 +2328,14 @@ class LiveTradingAdapter:
             preload=preload,
         )
     
-    def _reauth_for_ws(self):
-        """WebSocket 被服务端以 4001 拒绝后，重新进行 HTTP 鉴权"""
-        from ..data.auth_manager import verify_auth, get_auth_message
-        authenticated = verify_auth(endpoint_index=self.ws_kline_client.endpoint_index)
-        if authenticated:
-            print("[实盘适配器] WebSocket 重新鉴权成功")
-        else:
-            print(f"[实盘适配器] WebSocket 重新鉴权失败: {get_auth_message()}")
-        return authenticated
-    
+    def _on_ws_failure(self, error):
+        """A terminated SDK stream cannot drive a strategy with stale K lines."""
+        self._remote_data_error = error
+        self.running = False
+        self._ws_preload_done.set()
+        self._update_runtime_state(remote_data_status='failed', remote_data_error=str(error))
+        print(f"[实盘适配器] ssquantdata 实时流已停止: {error}；请核验数据并重新启动策略")
+
     def _on_ws_kline(self, symbol: str, period: str, kline_data: Dict):
         """
         data_server WebSocket K线推送回调
@@ -2393,6 +2367,8 @@ class LiveTradingAdapter:
             if self.running and not self.enable_tick_callback:
                 try:
                     with self._strategy_lock:
+                        if not self.running:
+                            return
                         if getattr(self, '_rollover_engine', None):
                             self._rollover_engine.process_before_strategy()
                         self.strategy_func(self.api)
@@ -2646,6 +2622,8 @@ class LiveTradingAdapter:
         
         try:
             with self._strategy_lock:
+                if not self.running:
+                    return
                 if getattr(self, '_rollover_engine', None):
                     self._rollover_engine.process_before_strategy()
                 if self.enable_tick_callback:

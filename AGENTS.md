@@ -65,6 +65,8 @@ SKILL.md                         # 面向 Codex / Claude Code 的完整框架指
 5. **数据模式**：
    - `data_source_mode='data_server'`：远程数据，需俱乐部账号。
    - `data_source_mode='local'`：本地 SQLite，免会员；TICK 回测必须使用本地模式。
+   - 远程行情与会员鉴权统一通过 `ssquant/data/sdk_client.py` 复用官方 `ssquantdata` 客户端；不要恢复旧 `/api/auth/verify`、直接 IP HTTP/WS 或独立令牌缓存。
+   - SDK 实时缺口为终止状态，框架应停止使用旧 K 线驱动策略；历史快照不提供实时序号恢复保证。
 6. **默认高性能写法**：在 `initialize(api)` 中用 `api.register_indicator()` 注册指标，`strategy()` 中 O(1) 查表。
 7. **examples 是重要保障**：覆盖约 80% 常见期货策略类型，新手和 AI 写策略前都应先参考并跑通示例。
 

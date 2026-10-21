@@ -340,79 +340,15 @@ class HistoricalDataPreloader:
     
     def _fetch_from_data_server(self, symbol: str, period: str,
                                 lookback_bars: int, adjust_type: str) -> pd.DataFrame:
-        """
-        从 data_server REST API 获取数据（鉴权通过后优先使用）
-        
-        使用 /api/futures/history?limit=N 按数量获取最近N条，不受日期范围限制。
-        data_server 服务端完成 1M → 目标周期的聚合，客户端直接请求目标周期。
-        复权由本地 apply_local_adjust() 完成。
-        """
-        try:
-            import requests
-            from .auth_manager import get_ordered_data_server_api_bases
-            api_bases = get_ordered_data_server_api_bases()
-            if not api_bases:
-                return pd.DataFrame()
+        """Preload via the same authenticated SDK client as remote history and WS."""
+        from .sdk_client import history_frame
 
-            normalized = period.strip().upper()
-            params = {
-                'symbol': symbol.lower(),
-                'period': normalized,
-                'limit': lookback_bars,
-                'adjust_type': '0',
-                'preload': 'true',
-            }
+        frame = history_frame(symbol, period, limit=lookback_bars, preload=True)
+        if not frame.empty and str(adjust_type) != '0':
+            from .local_adjust import apply_local_adjust
+            frame = apply_local_adjust(frame, symbol, period, adjust_type)
+        return frame
 
-            for api_base in api_bases:
-                url = f"{api_base}/api/futures/history"
-                try:
-                    resp = requests.get(url, params=params, timeout=(20, 180))
-                except requests.exceptions.ConnectionError:
-                    continue
-                except Exception:
-                    continue
-
-                if resp.status_code != 200:
-                    continue
-
-                try:
-                    result = resp.json()
-                except Exception:
-                    continue
-
-                if result.get('code') != 0:
-                    continue
-
-                data_obj = result.get('data', {})
-                records = data_obj.get('klines', []) if isinstance(data_obj, dict) else data_obj
-
-                if not records:
-                    continue
-
-                df = pd.DataFrame(records)
-
-                if df.empty or 'datetime' not in df.columns:
-                    continue
-
-                df['datetime'] = pd.to_datetime(df['datetime'])
-                df = df.set_index('datetime')
-
-                print(f"[data_server API] 获取 {normalized} 数据: {symbol} x {len(df)} 条 (via {api_base})")
-                print(f"  数据范围: {df.index[0]} ~ {df.index[-1]}")
-
-                # 本地复权（当前为占位直通，后续实现算法后自动生效）
-                if adjust_type != '0':
-                    from .local_adjust import apply_local_adjust
-                    df = apply_local_adjust(df, symbol, period, adjust_type)
-
-                return df
-
-            return pd.DataFrame()
-
-        except Exception:
-            return pd.DataFrame()
-    
-    
     def preload_tick(self, specific_contract: str, 
                      lookback_count: int = 1000,
                      history_symbol: str = None) -> pd.DataFrame:

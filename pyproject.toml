@@ -17,7 +17,7 @@ dependencies = [
     "pandas>=1.3.0",
     "numpy>=1.20.0",
     "requests>=2.25.0",
-    "websockets>=10.0",
+    "ssquantdata>=0.1.3,<0.2",
     "plotly>=5.18.0",
     "matplotlib>=3.5.0",
     "Pillow>=8.0.0",
@@ -27,6 +27,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+test = [
+    "pytest>=8,<9",
+    "websockets>=14,<17",
+]
 ml = [
     "scikit-learn>=0.24.0",
     "joblib>=1.0.0",

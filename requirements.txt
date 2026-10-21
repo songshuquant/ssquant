@@ -5,7 +5,7 @@
 numpy>=1.20.0
 pandas>=1.3.0
 requests>=2.25.0
-websockets>=10.0          # data_server WebSocket 实时推送
+ssquantdata>=0.1.3,<0.2   # 官方远程数据、Bearer 鉴权及实时订阅 SDK
 
 # 可视化依赖（回测报告需要）
 plotly>=5.18.0
