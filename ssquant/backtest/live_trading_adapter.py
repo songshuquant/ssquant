@@ -2354,12 +2354,13 @@ class LiveTradingAdapter:
     
     def _reauth_for_ws(self):
         """WebSocket 被服务端以 4001 拒绝后，重新进行 HTTP 鉴权"""
-        from ..data.auth_manager import reset_auth, verify_auth, get_auth_message
-        reset_auth()
-        if verify_auth():
+        from ..data.auth_manager import verify_auth, get_auth_message
+        authenticated = verify_auth(endpoint_index=self.ws_kline_client.endpoint_index)
+        if authenticated:
             print("[实盘适配器] WebSocket 重新鉴权成功")
         else:
             print(f"[实盘适配器] WebSocket 重新鉴权失败: {get_auth_message()}")
+        return authenticated
     
     def _on_ws_kline(self, symbol: str, period: str, kline_data: Dict):
         """
